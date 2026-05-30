@@ -58,7 +58,7 @@ def get_run_stats() -> dict:
         return {"today_runs": 0, "today_creators": 0, "total_creators": 0, "last_run": "从未"}
     try:
         conn = sqlite3.connect(str(db_path))
-        today = __import__('datetime').datetime.now().strftime("%Y-%m-%d")
+        today = datetime.now().strftime("%Y-%m-%d")
         today_runs = conn.execute(
             "SELECT COUNT(DISTINCT run_date) FROM daily_results WHERE run_date = ?", (today,)
         ).fetchone()[0]
@@ -66,7 +66,22 @@ def get_run_stats() -> dict:
             "SELECT COUNT(DISTINCT creator_key) FROM daily_results WHERE run_date = ?", (today,)
         ).fetchone()[0]
         total_creators = conn.execute("SELECT COUNT(*) FROM creators").fetchone()[0]
-        last_run = conn.execute("SELECT MAX(run_date) FROM daily_results").fetchone()[0] or "从未"
+        last = conn.execute("SELECT MAX(run_date) FROM daily_results").fetchone()[0]
+        if last and last != "从未":
+            # 取这个日期的最后写入时间
+            last_time = conn.execute(
+                "SELECT MAX(rowid) FROM daily_results WHERE run_date = ?", (last,)
+            ).fetchone()[0]
+            # 用 SQLite 文件修改时间来推断时间
+            last_run = f"{last}"
+        else:
+            last_run = "从未"
+        # 用数据库文件的修改时间来推算最近一次运行时间
+        import os
+        mtime = os.path.getmtime(str(db_path))
+        last_dt = datetime.fromtimestamp(mtime)
+        if last and last != "从未":
+            last_run = f"{last} {last_dt:%H:%M}"
         conn.close()
         return {"today_runs": today_runs, "today_creators": today_creators,
                 "total_creators": total_creators, "last_run": last_run}
@@ -251,11 +266,12 @@ else:
         try:
             df_top = pd.read_excel(latest, sheet_name="今日Top推荐")
             cols = [c for c in [
-                "排名", "推荐等级", "AI评分", "达人昵称", "粉丝数",
-                "内容类型", "推荐产品", "合作建议",
+                "排名", "是否新达人", "推荐等级", "AI评分",
+                "评分明细", "评分理由", "达人昵称", "抖音达人类型", "粉丝数",
+                "推荐产品", "合作建议",
                 "公开联系方式", "联系方式类型",
                 "达人主页链接", "代表视频链接",
-                "提取状态", "缺失原因", "搜索关键词",
+                "风险点", "搜索关键词", "数据来源", "提取状态",
             ] if c in df_top.columns]
 
             column_config = {}
