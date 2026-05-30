@@ -37,14 +37,33 @@ def _generate_ms_token() -> str:
 
 
 def _load_cookies() -> dict[str, str]:
-    """从本机 Chrome 提取抖音 cookies。"""
-    try:
-        import browser_cookie3
-        raw = list(browser_cookie3.chrome(domain_name="douyin.com"))
-        return {c.name: c.value for c in raw if c.value}
-    except Exception as e:
-        logger.warning(f"无法提取 Chrome cookies: {e}")
-        return {}
+    """从本机 Chrome 所有 Profile 提取抖音 cookies。"""
+    import browser_cookie3
+    from pathlib import Path
+
+    chrome_dir = Path.home() / "Library/Application Support/Google/Chrome"
+    cookies: dict[str, str] = {}
+
+    # 扫描所有 Profile，逐一用 browser_cookie3 解密
+    for db_path in sorted(chrome_dir.glob("*/Cookies"), key=lambda p: p.stat().st_size, reverse=True):
+        try:
+            raw = list(browser_cookie3.chrome(cookie_file=str(db_path)))
+            for c in raw:
+                if "douyin" in c.domain and c.value and c.name not in cookies:
+                    cookies[c.name] = c.value
+            if any("sessionid" in k for k in cookies):
+                break  # 找到有登录态的 profile 就停
+        except Exception:
+            continue
+
+    if not cookies:
+        try:
+            raw = list(browser_cookie3.chrome(domain_name="douyin.com"))
+            cookies = {c.name: c.value for c in raw if c.value}
+        except Exception:
+            pass
+
+    return cookies
 
 
 class DouyinSearchAPI(BaseDataSource):
