@@ -14,26 +14,37 @@ CONFIG_DIR = ROOT / "config"
 DATA_DIR = ROOT / "data"
 
 
+# 硬编码默认值，保证云端和本地永远能读到
+_DEFAULTS = {
+    "SEARCH_API_PROVIDER": "bocha",
+    "SEARCH_API_KEY": "sk-d6d73e45bfd748b0ba75f5111d44c803",
+    "ENABLE_AI": "false",
+}
+
+
 def _get_secret(key: str, default: str = "") -> str:
-    """优先从 Streamlit secrets 读取，其次从环境变量，最后从 .env 文件。"""
-    # Streamlit Cloud secrets
+    """多层兜底：st.secrets → 环境变量 → .env → 硬编码默认值"""
+    # 1. Streamlit Cloud secrets
     try:
         import streamlit as st
-        # st.secrets 是 dict-like，用 [] 访问
         val = st.secrets.get(key) if hasattr(st.secrets, "get") else None
         if val is None:
             try:
                 val = st.secrets[key]
             except (KeyError, TypeError):
                 pass
-        if val is not None and val != "":
+        if val is not None and str(val) != "":
             return str(val)
     except Exception:
         pass
-    # 环境变量
+    # 2. 环境变量
     val = os.getenv(key)
     if val is not None and val != "":
-        return val
+        return str(val)
+    # 3. .env 文件（由 python-dotenv 注入到 os.environ）
+    # 4. 硬编码默认值
+    if key in _DEFAULTS:
+        return str(_DEFAULTS[key])
     return default
 
 
