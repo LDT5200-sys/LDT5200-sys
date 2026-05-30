@@ -1,6 +1,7 @@
 """Streamlit 本地页面：上传文件、数据发现、AI 评分、人工状态管理。"""
 from __future__ import annotations
 
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -82,6 +83,16 @@ with tab_run:
         # 提示当前 API 配置情况
         env = load_env()
         has_search_key = bool(env.get("SEARCH_API_KEY"))
+
+        # 调试：展示 st.secrets 和 env 的实际内容
+        with st.expander("🔧 调试：当前配置状态"):
+            try:
+                st.write("**st.secrets** 内容:", dict(st.secrets))
+            except Exception as e:
+                st.write("**st.secrets** 异常:", str(e))
+            st.write("**load_env()** SEARCH_API_PROVIDER:", env.get("SEARCH_API_PROVIDER", "(空)"))
+            st.write("**load_env()** SEARCH_API_KEY:", (env.get("SEARCH_API_KEY") or "(空)")[:20] + "...")
+            st.write("**os.getenv** SEARCH_API_KEY:", (os.getenv("SEARCH_API_KEY") or "(空)")[:20] + "...")
         has_douyin_key = bool(env.get("DOUYIN_API_KEY") or env.get("DOUYIN_ACCESS_TOKEN"))
         if mode in ("公开搜索发现", "本地表格 + 公开搜索"):
             if has_search_key:
