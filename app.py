@@ -161,7 +161,12 @@ else:
     with tab2:
         try:
             df_all = pd.read_excel(latest, sheet_name="全部候选")
-            st.dataframe(df_all, width="stretch", height=500)
+            all_col_config = {}
+            if "达人主页链接" in df_all.columns:
+                all_col_config["达人主页链接"] = st.column_config.LinkColumn("达人主页链接", display_text="🔗 打开")
+            if "代表视频链接" in df_all.columns:
+                all_col_config["代表视频链接"] = st.column_config.LinkColumn("代表视频链接", display_text="▶ 打开")
+            st.dataframe(df_all, width="stretch", height=500, column_config=all_col_config or None)
         except Exception as e:
             st.error(f"读取失败：{e}")
 
@@ -179,7 +184,10 @@ else:
                 "creator_profile_url": "主页链接",
                 "contact_text": "公开联系方式", "extraction_status": "提取状态",
             })
-            st.dataframe(df_status, width="stretch", height=400)
+            status_col_config = {}
+            if "主页链接" in df_status.columns:
+                status_col_config["主页链接"] = st.column_config.LinkColumn("主页链接", display_text="🔗 打开")
+            st.dataframe(df_status, width="stretch", height=400, column_config=status_col_config or None)
 
             col_a, col_b, col_c = st.columns(3)
             with col_a:

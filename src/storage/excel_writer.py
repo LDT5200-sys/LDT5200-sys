@@ -23,6 +23,20 @@ _TOP_COLUMNS_CN = [
 ]
 
 
+def _fmt_followers(v) -> str:
+    """粉丝数格式化为万单位，如 105000 → 10.5w，小于1万显示原始数字"""
+    if v is None or v == "" or (isinstance(v, float) and v != v):
+        return ""
+    try:
+        n = int(float(v))
+    except (ValueError, TypeError):
+        return str(v)
+    if n >= 10000:
+        w = n / 10000
+        return f"{w:.1f}w" if w < 100 else f"{int(w)}w"
+    return str(n)
+
+
 def _records_to_df(records: list[CreatorRecord]) -> pd.DataFrame:
     rows = [r.model_dump() for r in records]
     df = pd.DataFrame(rows)
@@ -30,6 +44,9 @@ def _records_to_df(records: list[CreatorRecord]) -> pd.DataFrame:
         if col not in df.columns:
             df[col] = ""
     df = df[STANDARD_FIELDS].fillna("")
+    # 粉丝数格式化为万单位
+    if "follower_count" in df.columns:
+        df["follower_count"] = df["follower_count"].apply(_fmt_followers)
     return df
 
 
