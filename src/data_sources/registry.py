@@ -6,6 +6,7 @@ from typing import Any
 from src.data_sources.base import BaseDataSource
 from src.data_sources.browser_export_importer import BrowserExportImporter
 from src.data_sources.csv_importer import CSVImporter
+from src.data_sources.douyin_cdp_source import DouyinCDPSource
 from src.data_sources.douyin_search_api import DouyinSearchAPI
 from src.data_sources.douyin_search_source import DouyinSearchSource
 from src.data_sources.excel_importer import ExcelImporter
@@ -25,10 +26,11 @@ _REGISTRY = {
     "public_search": PublicSearchAdapter,
     "douyin_search": DouyinSearchSource,
     "douyin_api": DouyinSearchAPI,
+    "douyin_cdp": DouyinCDPSource,
     "browser_export": BrowserExportImporter,
 }
 
-_KEYWORD_SOURCES = (SearchAPIAdapter, PublicSearchAdapter, DouyinSearchSource, DouyinSearchAPI)
+_KEYWORD_SOURCES = (SearchAPIAdapter, PublicSearchAdapter, DouyinSearchSource, DouyinSearchAPI, DouyinCDPSource)
 
 
 def build_sources(keywords: list[str] | None = None) -> list[BaseDataSource]:

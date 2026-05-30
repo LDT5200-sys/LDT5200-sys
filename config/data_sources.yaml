@@ -43,10 +43,14 @@ sources:
       - "穿搭"
     enrich_urls: true     # 抓到的 douyin 链接交给 douyin_url_enricher 二次解析
 
+  - name: douyin_cdp
+    type: douyin_cdp
+    enabled: true         # 通过 CDP + 真实 Chrome 在页面内调搜索 API，自动生成签名
+    # 前提：Chrome 需以 --remote-debugging-port=9222 --remote-allow-origins=* 启动
+
   - name: douyin_api
     type: douyin_api
-    enabled: true         # 通过 msToken + Chrome cookies 直接调抖音搜索 API
-    # 无需额外配置，自动读取 Chrome 登录态
+    enabled: false        # msToken 直调方案（可能被限流，作为备用）
 
   - name: douyin_search
     type: douyin_search

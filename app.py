@@ -19,6 +19,30 @@ from src.utils.config_loader import DATA_DIR, seed_keywords_config
 st.set_page_config(page_title="龙牙达人发现", layout="wide")
 st.title("🎯 龙牙外部达人自动发现")
 
+# CDP 状态检测
+def check_cdp():
+    try:
+        import requests
+        r = requests.get("http://127.0.0.1:9222/json/version", timeout=2)
+        if r.status_code == 200:
+            return True, r.json().get("Browser", "Chrome")
+    except Exception:
+        pass
+    return False, None
+
+cdp_ok, cdp_browser = check_cdp()
+if cdp_ok:
+    st.success(f"🟢 CDP Chrome 在线 ({cdp_browser}) — 可自动搜索抖音")
+else:
+    st.error("🔴 CDP Chrome 离线 — 请在终端运行以下命令后刷新页面：")
+    st.code(
+        '"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \\\n'
+        '  --remote-debugging-port=9222 \\\n'
+        '  "--remote-allow-origins=*" \\\n'
+        '  --user-data-dir="/tmp/cdp-chrome-profile" \\\n'
+        '  "https://www.douyin.com/" &'
+    )
+
 input_dir = DATA_DIR / "input"
 output_dir = DATA_DIR / "output"
 input_dir.mkdir(parents=True, exist_ok=True)

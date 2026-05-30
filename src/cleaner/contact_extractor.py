@@ -22,7 +22,14 @@ _RE_WX = re.compile(
 _KEYWORDS_BIZ = ["商务合作", "商务", "合作", "私信合作", "合作请", "合作私信", "广告合作"]
 _KEYWORDS_XINGTU = ["星图", "巨量星图", "xingtu"]
 _KEYWORDS_SHOP = ["橱窗", "小店", "购物车"]
-_KEYWORDS_HINT = ["留言", "评论区", "主页"]
+_KEYWORDS_HINT = ["留言", "评论区", "主页", "备注来意", "🈴", "🤝", "📮", "➕V", "+V", "➕v", "+v"]
+# 微信号/QQ号模式：纯英文数字下划线 5-20 位，出现在 bio 中
+_RE_WX_LOOSE = re.compile(
+    r'(?:[VvXx]?[信微]?\s*[:：]?\s*|\+[Vv]\s*|\➕[Vv]?\s*)'
+    r'([A-Za-z][A-Za-z0-9_\-]{4,19})'
+)
+# QQ号模式
+_RE_QQ = re.compile(r'(?:[Qq扣][Qq]\s*[:：]?\s*)(\d{5,12})')
 
 
 @dataclass
@@ -79,6 +86,8 @@ def extract_contact(rec: CreatorRecord, snippet: str = "") -> ContactResult:
     _scan("邮箱", _RE_EMAIL)
     _scan("手机号", _RE_PHONE)
     _scan("微信", _RE_WX)
+    _scan("微信", _RE_WX_LOOSE)
+    _scan("QQ", _RE_QQ)
 
     # 关键词命中（弱信号，用 contains）
     def _keyword_scan(rule_type: str, words: list[str]):
