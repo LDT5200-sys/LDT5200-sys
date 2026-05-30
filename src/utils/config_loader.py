@@ -19,14 +19,20 @@ def _get_secret(key: str, default: str = "") -> str:
     # Streamlit Cloud secrets
     try:
         import streamlit as st
-        val = st.secrets.get(key, None)
-        if val is not None:
+        # st.secrets 是 dict-like，用 [] 访问
+        val = st.secrets.get(key) if hasattr(st.secrets, "get") else None
+        if val is None:
+            try:
+                val = st.secrets[key]
+            except (KeyError, TypeError):
+                pass
+        if val is not None and val != "":
             return str(val)
     except Exception:
         pass
     # 环境变量
     val = os.getenv(key)
-    if val is not None:
+    if val is not None and val != "":
         return val
     return default
 

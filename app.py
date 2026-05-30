@@ -11,13 +11,16 @@ sys.path.insert(0, str(ROOT))
 import pandas as pd
 import streamlit as st
 
+from src.utils.config_loader import DATA_DIR, load_env, seed_keywords_config
+# 清除可能因导入时调用而缓存的空配置，强制从 st.secrets 重新读
+load_env.cache_clear()
+
 from src.main import run
 from src.models.schemas import CREATOR_STATUS
 from src.storage.sqlite_store import (
     list_creators_with_status,
     update_creator_status,
 )
-from src.utils.config_loader import DATA_DIR, load_env, seed_keywords_config
 
 st.set_page_config(page_title="龙牙外部达人发现", layout="wide")
 st.title("龙牙外部达人自动发现与AI评分系统")
