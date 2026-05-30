@@ -1,0 +1,184 @@
+# 字段映射：把不同来源的原始列名归一到标准字段。
+# key 是标准字段，value 是该字段在不同来源中可能出现的列名（按顺序匹配，命中即用）。
+# 大小写不敏感，会做 strip。
+
+standard_fields:
+  collect_date:
+    - 采集日期
+    - collect_date
+    - date
+  source_name:
+    - 数据来源
+    - source
+    - source_name
+  platform:
+    - 平台
+    - platform
+  search_keyword:
+    - 搜索关键词
+    - 关键词
+    - keyword
+    - search_keyword
+  creator_name:
+    - 达人昵称
+    - 昵称
+    - 博主
+    - 作者
+    - nickname
+    - author
+    - creator_name
+  creator_id:
+    - 达人ID
+    - 达人UID
+    - 抖音号
+    - 用户ID
+    - uid
+    - user_id
+    - creator_id
+    - sec_uid
+  creator_profile_url:
+    - 主页链接
+    - 达人主页链接
+    - 达人链接
+    - 达人主页
+    - 主页
+    - profile_url
+    - creator_url
+    - homepage
+  video_url:
+    - 视频链接
+    - 作品链接
+    - aweme_url
+    - video_url
+    - share_url
+  video_title:
+    - 视频标题
+    - 标题
+    - title
+    - video_title
+  video_desc:
+    - 视频文案
+    - 文案
+    - 简介
+    - desc
+    - description
+    - video_desc
+  publish_time:
+    - 发布时间
+    - publish_time
+    - create_time
+  like_count:
+    - 点赞数
+    - 点赞
+    - digg_count
+    - like_count
+    - likes
+  comment_count:
+    - 评论数
+    - 评论
+    - comment_count
+    - comments
+  share_count:
+    - 分享数
+    - 分享
+    - share_count
+    - shares
+  collect_count:
+    - 收藏数
+    - 收藏
+    - collect_count
+    - favorites
+  follower_count:
+    - 粉丝数
+    - 粉丝
+    - follower_count
+    - followers
+    - fans
+  creator_bio:
+    - 账号简介
+    - 达人简介
+    - 个人简介
+    - signature
+    - bio
+    - creator_bio
+  tags:
+    - 标签
+    - tag
+    - tags
+    - category
+  contact_visible:
+    - 是否有联系方式
+    - 公开联系方式
+    - contact_visible
+  contact_location:
+    - 联系方式位置
+    - contact_location
+  contact_text:
+    - 公开联系方式原文
+    - 联系方式原文
+    - contact_text
+  contact_type:
+    - 联系方式类型
+    - contact_type
+  source_url:
+    - 数据来源链接
+    - 来源链接
+    - source_url
+  url_type:
+    - 链接类型
+    - url_type
+  extraction_status:
+    - 提取状态
+    - extraction_status
+  missing_reason:
+    - 缺失原因
+    - missing_reason
+  raw_text:
+    - 原始文本
+    - OCR内容
+    - raw_text
+  raw_data:
+    - 原始数据
+    - raw_data
+
+# 输出 Excel 时使用的中文表头映射（标准字段 → 中文列名）
+output_chinese_headers:
+  collect_date: 采集日期
+  source_name: 数据来源
+  platform: 平台
+  search_keyword: 搜索关键词
+  creator_name: 达人昵称
+  creator_id: 达人ID
+  creator_profile_url: 达人主页链接
+  video_url: 代表视频链接
+  video_title: 视频标题
+  video_desc: 视频文案
+  publish_time: 发布时间
+  like_count: 点赞数
+  comment_count: 评论数
+  share_count: 分享数
+  collect_count: 收藏数
+  follower_count: 粉丝数
+  creator_bio: 账号简介
+  tags: 标签
+  contact_visible: 是否有公开联系方式
+  contact_text: 公开联系方式
+  contact_type: 联系方式类型
+  contact_location: 联系方式位置
+  source_url: 数据来源链接
+  url_type: 链接类型
+  extraction_status: 提取状态
+  missing_reason: 缺失原因
+  raw_text: 原始文本
+  raw_data: 原始数据
+  content_type: 内容类型
+  is_fit_longya: 是否适合龙牙
+  is_guozi_like: 是否接近果子模式
+  ai_score: AI评分
+  rule_score: 规则评分
+  priority_level: 推荐等级
+  cooperation_suggestion: 合作建议
+  recommended_product: 推荐产品
+  recommend_reason: 推荐理由
+  risk_reason: 风险点
+  next_action: 下一步动作

@@ -1,0 +1,88 @@
+# 抖音数据源配置（专为 douyin_search_source 使用）
+# 与 seed_keywords.yaml 独立：此处可维持专属关键词，或留空则自动从 seed_keywords 取。
+
+keywords: []
+# 手动列关键词（优先级高于 seed_keywords）：
+#   - 女生测男装
+#   - 男装测评
+# 如果此处为空且 api_mode.enabled=false，导入模式也会尝试取种子词作为搜索意图标签。
+
+max_per_keyword: 30          # 每个关键词最多取几条（API/导入通用）
+
+# ---------- 模式 A：本地导出表导入 ----------
+import_mode:
+  enabled: true              # 是否扫描 data/input/douyin/ 下的文件
+  input_dir: data/input/douyin  # 相对于项目根目录（与 data_sources.yaml 中 input_dir 约定一致）
+  formats:                   # 允许的文件类型
+    - xlsx
+    - csv
+    - html
+  encoding: utf-8
+
+# ---------- 模式 B：API 模式 ----------
+api_mode:
+  enabled: false             # 是否通过 API 拉取
+  provider: generic          # douyin_open / xingtu / third_party / generic
+  base_url: ""
+  api_key: ""                # 留空则从 .env 的 DOUYIN_DATA_PROVIDER 读取
+  method: GET                # GET 或 POST_JSON
+  timeout: 20
+  retries: 2
+  params_template:
+    keyword: "{keyword}"
+    page: "{page}"
+    page_size: 20
+  page_start: 1
+  page_end: 1                # 每关键词翻几页（注意配额）
+  response_path: "data.list" # JSON 中命中列表的路径，点号分隔
+  headers: {}                # 额外的 HTTP Header，如 Authorization
+  # 认证方式：token 时在 headers 里填；param 时在 params_template 里加；
+  # 签名字段由子类按具体平台逻辑处理。
+
+# ---------- API 返回字段 → 标准字段映射 ----------
+# key 是 API 返回 JSON 里的字段名（支持点号路径），value 是标准字段中文名。
+# 此映射与 config/field_mapping.yaml 互补：先走专属映射，再走通用映射。
+field_mapping_overrides:
+  nickname:            达人昵称
+  sec_uid:             达人ID
+  avatar_url:          ""        # 暂不映射
+  homepage_url:        主页链接
+  aweme_list.0.share_url: 视频链接
+  aweme_list.0.desc:  视频文案
+  video_title:         视频标题
+  create_time:         发布时间
+  digg_count:          点赞数
+  comment_count:       评论数
+  share_count:         分享数
+  follower_count:      粉丝数
+  signature:           账号简介
+  tags:                标签
+  contact_info:        公开联系方式原文
+
+# ---------- 社媒助手导出表 → 标准字段映射 ----------
+# 社媒助手导出的 Excel 列名完全不需配置即可被 field_mapping.yaml 通用映射匹配。
+# 以下是已验证的对应关系（供参考，无需手动维护）：
+#
+#   社媒助手列名          →  标准字段
+#   ─────────────────────────────────
+#   视频链接              →  video_url
+#   视频ID                →  (raw_data)
+#   达人链接              →  creator_profile_url
+#   达人UID               →  creator_id
+#   抖音号                →  creator_id
+#   达人昵称              →  creator_name
+#   粉丝数                →  follower_count
+#   达人简介              →  creator_bio
+#   媒体类型              →  (raw_data)
+#   视频描述              →  video_desc
+#   OCR内容               →  raw_text
+#   点赞数                →  like_count
+#   收藏数                →  collect_count
+#   评论数                →  comment_count
+#   分享数                →  share_count
+#   发布时间              →  publish_time
+#   视频下载链接           →  (raw_data)
+smzs_field_note: "社媒助手导出的 Excel 列名已在 field_mapping.yaml 中覆盖，直接可用"
+
+# ---------- URL 补全 ----------
+enable_url_enrich: true     # 导入/API 返回的链接是否走 douyin_url_enricher 做分类

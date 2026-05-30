@@ -1,0 +1,94 @@
+total_score: 100
+
+dimensions:
+  content_match:
+    name: 内容匹配度
+    max: 30
+    high_value_keywords:
+      - 女生测男装
+      - 女穿男装
+      - 男装测评
+      - 短袖测评
+      - 微胖男生穿搭
+      - 大码男装
+      - 通勤穿搭
+      - 户外穿搭
+      - 机能穿搭
+    low_value_keywords:
+      - 美妆
+      - 母婴
+      - 萌宠
+      - 美食探店
+      - 影视剪辑
+      - 游戏
+
+  data_performance:
+    name: 数据表现
+    max: 20
+    like_thresholds:
+      bonus: 2000
+      excellent: 10000
+    note: 缺少数据时给中性分（满分 50%），不直接淘汰
+
+  creator_scale:
+    name: 达人量级
+    max: 15
+    tiers:
+      - max_followers: 50000
+        label: 置换/低成本测试
+        score: 12
+      - max_followers: 500000
+        label: 中腰部合作
+        score: 15
+      - max_followers: 100000000
+        label: 头部需评估成本
+        score: 10
+    burst_bonus: 3   # 粉丝少但单条爆发好的兜底加分
+
+  cooperation_feasibility:
+    name: 合作可行性
+    max: 15
+    has_profile_url: 5
+    has_video_url: 3
+    has_contact: 5
+    has_xingtu: 2
+
+  reuse_potential:
+    name: 素材复用潜力
+    max: 10
+    bonus_keywords:
+      - 测评
+      - 试穿
+      - 反差
+      - 真实
+      - 体验
+      - 改造
+      - 对比
+
+  risk_penalty:
+    name: 风险扣分
+    max_penalty: 10
+    risk_keywords:
+      - 低俗
+      - 擦边
+      - 争议
+      - 攻击
+      - 刷量
+      - 营销号
+      - 引战
+
+priority_thresholds:
+  S: 85
+  A: 75
+  B: 60
+  reject_below: 45
+
+cooperation_suggestion_map:
+  S: 报价评估
+  A: 低价测试
+  B: 置换
+  C: 暂不建议
+  淘汰: 暂不建议
+
+# 历史已淘汰达人的回捞阈值
+revive_threshold: 80

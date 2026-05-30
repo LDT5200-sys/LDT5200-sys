@@ -1,0 +1,16 @@
+.venv/
+.env
+data/database/
+data/output/
+data/raw/
+data/processed/
+data/input/douyin/*.csv
+data/input/douyin/*.xlsx
+data/input/douyin/*.png
+data/input/douyin/*.html
+data/input/douyin/*.json
+logs/
+__pycache__/
+*.pyc
+.DS_Store
+*.db
