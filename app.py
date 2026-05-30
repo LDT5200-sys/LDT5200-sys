@@ -19,7 +19,7 @@ from src.utils.config_loader import DATA_DIR, seed_keywords_config
 st.set_page_config(page_title="龙牙达人发现", layout="wide")
 st.title("🎯 龙牙外部达人自动发现")
 
-# CDP 状态检测
+# ===== 状态检测 =====
 def check_cdp():
     try:
         import requests
@@ -30,18 +30,86 @@ def check_cdp():
         pass
     return False, None
 
+def check_douyin_session() -> tuple[bool, str]:
+    """检测抖音登录态是否有效"""
+    try:
+        import browser_cookie3
+        from pathlib import Path
+        chrome = Path.home() / "Library/Application Support/Google/Chrome"
+        for db in sorted(chrome.glob("*/Cookies"), key=lambda p: p.stat().st_mtime, reverse=True):
+            try:
+                cookies = list(browser_cookie3.chrome(cookie_file=str(db)))
+                douyin = [c for c in cookies if 'douyin' in c.domain]
+                sessionid = [c for c in douyin if c.name == 'sessionid']
+                if sessionid:
+                    return True, f"Profile {db.parent.name} ({len(douyin)} cookies)"
+            except Exception:
+                continue
+        return False, "未找到登录态"
+    except Exception:
+        return False, "检测失败"
+
+def get_run_stats() -> dict:
+    """读取历史运行统计"""
+    import sqlite3
+    db_path = DATA_DIR / "database" / "creator_finder.db"
+    if not db_path.exists():
+        return {"today_runs": 0, "today_creators": 0, "total_creators": 0, "last_run": "从未"}
+    try:
+        conn = sqlite3.connect(str(db_path))
+        today = __import__('datetime').datetime.now().strftime("%Y-%m-%d")
+        today_runs = conn.execute(
+            "SELECT COUNT(DISTINCT run_date) FROM daily_results WHERE run_date = ?", (today,)
+        ).fetchone()[0]
+        today_creators = conn.execute(
+            "SELECT COUNT(DISTINCT creator_key) FROM daily_results WHERE run_date = ?", (today,)
+        ).fetchone()[0]
+        total_creators = conn.execute("SELECT COUNT(*) FROM creators").fetchone()[0]
+        last_run = conn.execute("SELECT MAX(run_date) FROM daily_results").fetchone()[0] or "从未"
+        conn.close()
+        return {"today_runs": today_runs, "today_creators": today_creators,
+                "total_creators": total_creators, "last_run": last_run}
+    except Exception:
+        return {"today_runs": 0, "today_creators": 0, "total_creators": 0, "last_run": "?"}
+
 cdp_ok, cdp_browser = check_cdp()
-if cdp_ok:
-    st.success(f"🟢 CDP Chrome 在线 ({cdp_browser}) — 可自动搜索抖音")
-else:
-    st.error("🔴 CDP Chrome 离线 — 请在终端运行以下命令后刷新页面：")
-    st.code(
-        '"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \\\n'
-        '  --remote-debugging-port=9222 \\\n'
-        '  "--remote-allow-origins=*" \\\n'
-        '  --user-data-dir="/tmp/cdp-chrome-profile" \\\n'
-        '  "https://www.douyin.com/" &'
-    )
+session_ok, session_info = check_douyin_session()
+stats = get_run_stats()
+
+# 状态面板
+stcols = st.columns(4)
+with stcols[0]:
+    if cdp_ok:
+        st.success(f"🟢 CDP 在线")
+    else:
+        st.error("🔴 CDP 离线")
+with stcols[1]:
+    if session_ok:
+        st.success(f"🟢 已登录抖音")
+    else:
+        st.error("🔴 需重新登录")
+with stcols[2]:
+    st.info(f"📊 今日 {stats['today_creators']} 达人")
+with stcols[3]:
+    st.info(f"⏱ 上次 {stats['last_run']}")
+
+# CDP 离线时显示启动命令
+if not cdp_ok:
+    with st.expander("🔧 CDP Chrome 启动命令（点击展开）"):
+        st.code(
+            '"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \\\n'
+            '  --remote-debugging-port=9222 \\\n'
+            '  "--remote-allow-origins=*" \\\n'
+            '  --user-data-dir="/tmp/cdp-chrome-profile" \\\n'
+            '  "https://www.douyin.com/" &'
+        )
+        st.caption("在终端粘贴运行后，刷新本页面。CDP Chrome 窗口不要关，每天开着就行。")
+
+if not session_ok:
+    st.warning("⚠️ 抖音登录态丢失。请在 Chrome 中打开 douyin.com 重新登录，然后刷新本页面。")
+
+# 运行限制提示
+st.caption("💡 抖音搜索 API 无固定次数限制，但避免短时间内连续跑超过 3 次。如果触发验证，等待 10-15 分钟即可恢复。CDP Chrome 窗口需要一直开着。")
 
 input_dir = DATA_DIR / "input"
 output_dir = DATA_DIR / "output"

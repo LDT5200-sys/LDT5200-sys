@@ -172,6 +172,7 @@ output_chinese_headers:
   raw_text: 原始文本
   raw_data: 原始数据
   content_type: 内容类型
+  douyin_type: 抖音达人类型
   is_fit_longya: 是否适合龙牙
   is_guozi_like: 是否接近果子模式
   ai_score: AI评分

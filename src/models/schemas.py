@@ -70,6 +70,7 @@ class CreatorRecord(BaseModel):
 
     # AI / 评分输出
     content_type: str = ""
+    douyin_type: str = ""           # 抖音达人类型（测评博主/穿搭博主等）
     is_fit_longya: str = ""
     is_guozi_like: str = ""
     rule_score: float = 0.0
@@ -131,7 +132,7 @@ STANDARD_FIELDS: list[str] = [
     "contact_visible", "contact_text", "contact_type", "contact_location",
     "extraction_status", "missing_reason",
     "raw_text", "raw_data",
-    "content_type", "is_fit_longya", "is_guozi_like",
+    "content_type", "douyin_type", "is_fit_longya", "is_guozi_like",
     "rule_score", "ai_score", "priority_level",
     "cooperation_suggestion", "recommended_product",
     "recommend_reason", "risk_reason", "next_action",

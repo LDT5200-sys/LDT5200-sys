@@ -223,6 +223,43 @@ def _ai_refine(rec: CreatorRecord, llm: LLMClient) -> dict | None:
         return None
 
 
+def _build_score_reason(rec: CreatorRecord, scores: dict) -> str:
+    """根据各维度得分生成评分理由"""
+    parts = []
+    dim_names = {
+        "content_match": "内容匹配", "data_performance": "数据表现",
+        "creator_scale": "达人量级", "cooperation_feasibility": "合作可行性",
+        "reuse_potential": "素材复用", "risk_penalty": "风险扣分",
+    }
+    for key, name in dim_names.items():
+        s = scores.get(key, 0)
+        if key == "risk_penalty" and s > 0:
+            parts.append(f"{name}-{s:.0f}")
+        elif key != "risk_penalty":
+            parts.append(f"{name}{s:.0f}")
+    return " | ".join(parts)
+
+
+_DOUYIN_TYPE_MAP = {
+    "女生测男装": "女测男装博主",
+    "女穿男装": "女穿男装博主",
+    "男装测评": "男装测评博主",
+    "短袖测评": "短袖测评/推荐博主",
+    "男友穿搭改造": "穿搭改造博主",
+    "微胖/大码男装": "微胖/大码男装博主",
+    "通勤户外穿搭": "通勤户外穿搭博主",
+    "机能/战术/户外": "机能战术户外博主",
+    "泛穿搭": "泛穿搭博主",
+    "泛生活方式": "泛生活方式博主",
+    "不相关": "不相关",
+}
+
+
+def _douyin_type(rec: CreatorRecord) -> str:
+    """根据内容类型映射为抖音达人类型"""
+    return _DOUYIN_TYPE_MAP.get(rec.content_type, "其他")
+
+
 def score_records(records: list[CreatorRecord]) -> list[CreatorRecord]:
     rules = scoring_rules()
     dims = rules.get("dimensions", {}) or {}
@@ -251,6 +288,15 @@ def score_records(records: list[CreatorRecord]) -> list[CreatorRecord]:
         rec.rule_score = round(rule_total, 1)
         rec.ai_score = rec.rule_score
 
+        # 评分理由
+        score_detail = {
+            "content_match": s_match, "data_performance": s_data,
+            "creator_scale": s_scale, "cooperation_feasibility": s_coop,
+            "reuse_potential": s_reuse, "risk_penalty": s_risk,
+        }
+        rec.recommend_reason = _build_score_reason(rec, score_detail)
+
+        rec.douyin_type = _douyin_type(rec)
         rec.recommended_product = _recommend_product(rec)
 
         if llm is not None:
