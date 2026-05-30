@@ -23,12 +23,43 @@ from src.utils.time_utils import today_str
 logger = get_logger()
 
 _SEARCH_API = "https://www.douyin.com/aweme/v1/web/search/item/"
+_USER_PROFILE_API = "https://www.douyin.com/aweme/v1/web/user/profile/other/"
 
 _USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
+# 缓存 sec_uid → 用户详情，避免重复请求
+_profile_cache: dict[str, dict] = {}
+
+
+def _enrich_profile(session: requests.Session, sec_uid: str) -> dict:
+    """调用户主页 API 补全 signature（简介）、联系方式等字段。结果缓存。"""
+    if sec_uid in _profile_cache:
+        return _profile_cache[sec_uid]
+
+    try:
+        r = session.get(_USER_PROFILE_API, params={
+            "sec_user_id": sec_uid,
+            "aid": "6383",
+            "msToken": _generate_ms_token(),
+        }, timeout=10)
+        data = r.json()
+        user = (data.get("user") or {}) if isinstance(data, dict) else {}
+        result = {
+            "signature": user.get("signature", ""),
+            "nickname": user.get("nickname", ""),
+            "follower_count": user.get("follower_count", 0),
+            "total_favorited": user.get("total_favorited", 0),
+            "aweme_count": user.get("aweme_count", 0),
+            "enterprise_verify_reason": user.get("enterprise_verify_reason", ""),
+            "custom_verify": user.get("custom_verify", ""),
+        }
+        _profile_cache[sec_uid] = result
+        return result
+    except Exception:
+        return {}
 
 def _generate_ms_token() -> str:
     """生成 107 位随机 msToken。"""
@@ -36,25 +67,24 @@ def _generate_ms_token() -> str:
     return "".join(random.choice(chars) for _ in range(107))
 
 
-def _load_cookies() -> dict[str, str]:
-    """从本机 Chrome 所有 Profile 提取抖音 cookies。"""
+def _load_all_profile_cookies() -> list[tuple[str, dict[str, str]]]:
+    """从本机 Chrome 所有 Profile 提取抖音 cookies，返回 [(profile_name, cookies), ...]"""
     import browser_cookie3
     from pathlib import Path
 
     chrome_dir = Path.home() / "Library/Application Support/Google/Chrome"
-    cookies: dict[str, str] = {}
+    results: list[tuple[str, dict[str, str]]] = []
 
-    # 扫描所有 Profile，逐一用 browser_cookie3 解密
-    for db_path in sorted(chrome_dir.glob("*/Cookies"), key=lambda p: p.stat().st_size, reverse=True):
+    for db_path in sorted(chrome_dir.glob("*/Cookies"), key=lambda p: p.stat().st_mtime, reverse=True):
         try:
             raw = list(browser_cookie3.chrome(cookie_file=str(db_path)))
-            for c in raw:
-                if "douyin" in c.domain and c.value and c.name not in cookies:
-                    cookies[c.name] = c.value
-            if any("sessionid" in k for k in cookies):
-                break  # 找到有登录态的 profile 就停
+            profile_cookies = {c.name: c.value for c in raw if "douyin" in c.domain and c.value}
+            if any("sessionid" in k for k in profile_cookies):
+                results.append((db_path.parent.name, profile_cookies))
         except Exception:
             continue
+
+    return results
 
     if not cookies:
         try:
@@ -109,8 +139,9 @@ class DouyinSearchAPI(BaseDataSource):
             logger.warning(f"[{self.name}] 无关键词")
             return []
 
-        session = self._ensure_session()
-        if not self._cookies:
+        # 从所有 Chrome Profile 中提取 cookies
+        all_profiles = _load_all_profile_cookies()
+        if not all_profiles:
             logger.warning(
                 f"[{self.name}] 无法获取 Chrome cookies，请先登录抖音网页版"
             )
@@ -118,10 +149,41 @@ class DouyinSearchAPI(BaseDataSource):
 
         rows: list[dict[str, Any]] = []
         seen_videos: set[str] = set()
-        consecutive_verify = 0
+        working_profile = None
 
-        for kw in self._keywords:
-            # 触发验证次数过多时停止
+        # 逐个 profile 试，找到第一个能搜出结果的
+        for profile_name, cookies in all_profiles:
+            logger.info(f"[{self.name}] 尝试 Profile: {profile_name} ({len(cookies)} cookies)")
+            session = self._make_session(cookies)
+
+            test_batch, is_verify = self._search_keyword(session, self._keywords[0])
+            if is_verify or len(test_batch) == 0:
+                logger.info(f"[{self.name}] Profile {profile_name} 验证失败，尝试下一个...")
+                continue
+
+            working_profile = profile_name
+            logger.info(f"[{self.name}] ✅ Profile {profile_name} 可用！")
+            for r in test_batch:
+                vid = r.get("视频链接", "")
+                if vid and vid not in seen_videos:
+                    seen_videos.add(vid)
+                    rows.append(r)
+            break
+
+        if not working_profile:
+            logger.warning(f"[{self.name}] 所有 Profile 均触发验证，本次无数据")
+            return []
+
+        # 用已验证的 session 继续搜剩余关键词
+        session = self._make_session(dict(all_profiles))  # hmm, need the right cookies
+        # Re-create session with working profile
+        for pn, ck in all_profiles:
+            if pn == working_profile:
+                session = self._make_session(ck)
+                break
+
+        consecutive_verify = 0
+        for kw in self._keywords[1:]:  # 第一个关键词已经在测试时搜过了
             if consecutive_verify >= 5:
                 logger.warning(f"[{self.name}] 连续 {consecutive_verify} 次触发验证，停止后续请求")
                 break
@@ -144,12 +206,26 @@ class DouyinSearchAPI(BaseDataSource):
                     rows.append(r)
             logger.info(f"[{self.name}] kw={kw} → {len(batch)} 条")
 
-            # 控制频率：每个关键词间隔 1-3 秒
             if len(batch) > 0:
-                time.sleep(1 + (len(self._keywords) % 3) * 0.5)
+                time.sleep(1.5)
 
-        logger.info(f"[{self.name}] 完成，去重后 {len(rows)} 条")
+        logger.info(f"[{self.name}] 完成，去重后 {len(rows)} 条 (Profile: {working_profile})")
         return rows
+
+    @staticmethod
+    def _make_session(cookies: dict[str, str]) -> requests.Session:
+        """用 cookies 创建一个已认证的 requests session。"""
+        session = requests.Session()
+        session.cookies.update(cookies)
+        session.headers.update({
+            "User-Agent": _USER_AGENT,
+            "Referer": "https://www.douyin.com/",
+        })
+        try:
+            session.get("https://www.douyin.com/", timeout=10)
+        except Exception:
+            pass
+        return session
 
     @retry(
         stop=stop_after_attempt(2),
@@ -181,6 +257,8 @@ class DouyinSearchAPI(BaseDataSource):
 
         items = data.get("data") or []
         records: list[dict[str, Any]] = []
+        enriched_sec_uids: set[str] = set()
+
         for item in items:
             aweme = (item.get("aweme_info") or {}) if isinstance(item, dict) else {}
             if not aweme:
@@ -193,6 +271,20 @@ class DouyinSearchAPI(BaseDataSource):
 
             profile_url = f"https://www.douyin.com/user/{sec_uid}" if sec_uid else ""
             video_url = f"https://www.douyin.com/video/{aweme_id}" if aweme_id else ""
+
+            # 补全达人简介：搜索 API 不返回 signature，需单独调用户主页 API
+            signature = author.get("signature", "")
+            follower_count = int(author.get("follower_count", 0))
+
+            if sec_uid and sec_uid not in enriched_sec_uids and not signature:
+                enriched_sec_uids.add(sec_uid)
+                profile = _enrich_profile(session, sec_uid)
+                if profile.get("signature"):
+                    signature = profile["signature"]
+                if profile.get("follower_count"):
+                    follower_count = int(profile["follower_count"])
+                if profile.get("nickname") and not author.get("nickname"):
+                    author["nickname"] = profile["nickname"]
 
             rec = {
                 "采集日期": today_str("%Y-%m-%d"),
@@ -210,12 +302,12 @@ class DouyinSearchAPI(BaseDataSource):
                 "评论数": int(stats.get("comment_count", 0)),
                 "分享数": int(stats.get("share_count", 0)),
                 "收藏数": int(stats.get("collect_count", 0)),
-                "粉丝数": int(author.get("follower_count", 0)),
-                "达人简介": author.get("signature", ""),
-                "原始文本": f"{aweme.get('desc','')} | {author.get('signature','')}",
+                "粉丝数": follower_count,
+                "达人简介": signature,
+                "原始文本": f"{aweme.get('desc','')} | {signature}",
                 "链接类型": "视频",
-                "提取状态": "成功",
-                "缺失原因": "点赞/评论等实时数据可能已变化",
+                "提取状态": "成功" if signature else "部分成功",
+                "缺失原因": "" if signature else "达人简介未获取（需单独调用用户主页API）",
                 "raw_data": str(item),
             }
             records.append(rec)
