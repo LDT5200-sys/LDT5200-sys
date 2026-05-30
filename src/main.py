@@ -41,6 +41,8 @@ def run(
     douyin_import: bool = False,
     enrich_remote: bool = False,
     keywords_override: list[str] | None = None,
+    use_ai_keywords: bool = False,
+    feedback_notes: list[str] | None = None,
 ) -> dict:
     logger.info("=" * 60)
     logger.info(
@@ -52,7 +54,26 @@ def run(
     expanded_keywords: list[str] = []
     if keywords_override:
         expanded_keywords = list(keywords_override)
-        logger.info(f"使用外部传入关键词 {len(expanded_keywords)} 条，跳过扩展")
+        logger.info(f"使用外部传入关键词 {len(expanded_keywords)} 条")
+    elif use_ai_keywords:
+        try:
+            from src.keyword.ai_keyword_optimizer import generate_keywords, load_feedback_history
+            fb = load_feedback_history()
+            expanded_keywords = generate_keywords(
+                n=25,
+                feedback=feedback_notes or fb.get("notes", []),
+                good_examples=fb.get("good", []),
+                bad_examples=fb.get("bad", []),
+            )
+            logger.info(f"AI 优化关键词: {len(expanded_keywords)} 条")
+            print(f"\n🤖 AI 生成关键词 ({len(expanded_keywords)} 条):")
+            for i, kw in enumerate(expanded_keywords[:10], 1):
+                print(f"  {i}. {kw}")
+            if len(expanded_keywords) > 10:
+                print(f"  ... 共 {len(expanded_keywords)} 条\n")
+        except Exception as e:
+            logger.warning(f"AI 关键词生成失败: {e}")
+            expanded_keywords = []
     elif not skip_keyword_expand:
         try:
             kw_df = expand_keywords(use_ai=not skip_ai)

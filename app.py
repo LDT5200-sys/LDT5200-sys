@@ -63,17 +63,39 @@ with st.sidebar:
         st.success(f"已上传 {len(uploads)} 个文件")
 
     st.header("🔑 关键词")
-    seeds = seed_keywords_config().get("seed_keywords", [])
-    chosen = st.multiselect("选择关键词", seeds, default=seeds[:8])
-    custom_kw = st.text_input("追加关键词（英文逗号分隔）", value="", placeholder="例如：战术裤测评,通勤穿搭")
+    use_ai_kw = st.checkbox("🤖 AI 自动优化关键词", value=False,
+        help="AI 根据品牌需求 + 历史反馈自动生成搜索关键词，无需手动选择。需配置 OPENAI_API_KEY。")
+
+    if use_ai_kw:
+        # AI 模式：显示反馈输入
+        feedback_notes = st.text_area(
+            "📝 给 AI 的需求提示（可选）",
+            value="",
+            placeholder="例如：多找微胖男装测评博主、优先女穿男装方向、排除纯娱乐号...",
+            height=80,
+        )
+        st.caption("AI 会结合品牌定位 + 你的需求 + 历史学习记录，自动生成最优搜索词")
+    else:
+        # 手动模式
+        seeds = seed_keywords_config().get("seed_keywords", [])
+        chosen = st.multiselect("选择关键词", seeds, default=seeds[:8])
+        custom_kw = st.text_input("追加关键词（英文逗号分隔）", value="", placeholder="例如：战术裤测评,通勤穿搭")
+        feedback_notes = None
 
     st.header("⚡ 运行")
-    skip_ai = st.checkbox("跳过 AI（仅规则评分）", value=True)
+    skip_ai = st.checkbox("跳过 AI 评分（仅规则评分）", value=True)
 
     if st.button("开始筛选", type="primary", use_container_width=True):
-        keywords = list(chosen)
-        if custom_kw.strip():
-            keywords.extend([k.strip() for k in custom_kw.split(",") if k.strip()])
+        keywords_final = None
+        fb = None
+        if not use_ai_kw:
+            kw_list = list(chosen) if chosen else []
+            if custom_kw.strip():
+                kw_list.extend([k.strip() for k in custom_kw.split(",") if k.strip()])
+            keywords_final = kw_list if kw_list else None
+        else:
+            fb = [feedback_notes] if feedback_notes.strip() else None
+
         with st.spinner("正在搜索抖音 → 清洗 → 评分 → 输出报表..."):
             try:
                 summary = run(
@@ -82,7 +104,9 @@ with st.sidebar:
                     discover=False,
                     douyin_import=False,
                     enrich_remote=False,
-                    keywords_override=keywords if keywords else None,
+                    keywords_override=keywords_final,
+                    use_ai_keywords=use_ai_kw,
+                    feedback_notes=fb,
                 )
                 st.session_state["last_summary"] = summary
                 st.success(f"完成！{summary['unique']} 条达人")
