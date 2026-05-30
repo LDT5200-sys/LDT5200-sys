@@ -223,6 +223,20 @@ def _ai_refine(rec: CreatorRecord, llm: LLMClient) -> dict | None:
         return None
 
 
+def _fmt_followers(v) -> str:
+    """数字转万单位"""
+    if v is None:
+        return "0"
+    try:
+        n = int(float(v))
+    except (ValueError, TypeError):
+        return str(v)
+    if n >= 10000:
+        w = n / 10000
+        return f"{w:.1f}w" if w < 100 else f"{int(w)}w"
+    return str(n)
+
+
 def _build_score_reason(rec: CreatorRecord, scores: dict) -> str:
     """根据各维度得分生成评分理由"""
     parts = []
@@ -288,13 +302,26 @@ def score_records(records: list[CreatorRecord]) -> list[CreatorRecord]:
         rec.rule_score = round(rule_total, 1)
         rec.ai_score = rec.rule_score
 
-        # 评分理由
-        score_detail = {
+        # 评分明细（简短数字）
+        rec.risk_reason = _build_score_reason(rec, {
             "content_match": s_match, "data_performance": s_data,
             "creator_scale": s_scale, "cooperation_feasibility": s_coop,
             "reuse_potential": s_reuse, "risk_penalty": s_risk,
-        }
-        rec.recommend_reason = _build_score_reason(rec, score_detail)
+        })
+
+        # 如果 AI 没有生成推荐理由，用规则生成一个简洁的
+        if not rec.recommend_reason:
+            parts = []
+            if rec.content_type and rec.content_type != "不相关":
+                parts.append(f"内容匹配{rec.content_type}")
+            if rec.follower_count:
+                parts.append(f"{_fmt_followers(rec.follower_count)}粉")
+            if rec.like_count:
+                parts.append(f"最高赞{_fmt_followers(rec.like_count)}")
+            if rec.is_guozi_like == "是":
+                parts.append("接近果子模式")
+            if parts:
+                rec.recommend_reason = "，".join(parts) + "。"
 
         rec.douyin_type = _douyin_type(rec)
         rec.recommended_product = _recommend_product(rec)

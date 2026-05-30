@@ -14,13 +14,11 @@ logger = get_logger()
 
 
 _TOP_COLUMNS_CN = [
-    "排名", "是否新达人", "推荐等级", "AI评分", "评分理由", "达人昵称", "平台", "粉丝数",
-    "内容类型", "抖音达人类型",
-    "是否接近果子模式", "推荐产品", "合作建议", "风险点", "下一步动作",
-    "达人主页链接", "代表视频链接", "链接类型",
-    "公开联系方式", "联系方式类型", "联系方式位置",
-    "提取状态", "缺失原因",
-    "搜索关键词", "数据来源", "数据来源链接",
+    "排名", "是否新达人", "推荐等级", "AI评分", "评分明细", "推荐理由",
+    "达人昵称", "抖音达人类型", "粉丝数", "推荐产品", "合作建议",
+    "公开联系方式", "联系方式类型",
+    "达人主页链接", "代表视频链接",
+    "搜索关键词", "数据来源", "提取状态",
 ]
 
 
@@ -94,17 +92,13 @@ def _build_top(df: pd.DataFrame, top_n: int = 50) -> pd.DataFrame:
         "是否新达人": "是否新达人",
         "priority_level": "推荐等级",
         "ai_score": "AI评分",
-        "recommend_reason": "评分理由",
+        "risk_reason": "评分明细",
+        "recommend_reason": "推荐理由",
         "creator_name": "达人昵称",
-        "platform": "平台",
         "follower_count": "粉丝数",
-        "content_type": "内容类型",
         "douyin_type": "抖音达人类型",
-        "is_guozi_like": "是否接近果子模式",
         "recommended_product": "推荐产品",
         "cooperation_suggestion": "合作建议",
-        "risk_reason": "风险点",
-        "next_action": "下一步动作",
         "creator_profile_url": "达人主页链接",
         "video_url": "代表视频链接",
         "url_type": "链接类型",

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -164,22 +165,67 @@ with st.sidebar:
         else:
             fb = [feedback_notes] if feedback_notes.strip() else None
 
-        with st.spinner("正在搜索抖音 → 清洗 → 评分 → 输出报表..."):
-            try:
-                summary = run(
-                    skip_keyword_expand=True,
-                    skip_ai=skip_ai,
-                    discover=False,
-                    douyin_import=False,
-                    enrich_remote=False,
-                    keywords_override=keywords_final,
-                    use_ai_keywords=use_ai_kw,
-                    feedback_notes=fb,
-                )
-                st.session_state["last_summary"] = summary
-                st.success(f"完成！{summary['unique']} 条达人")
-            except Exception as e:
-                st.error(f"运行失败：{e}")
+        start_time = time.time()
+        # 估算：每个关键词约 6 秒（搜索+补全简介），20 个关键词约 120 秒
+        kw_count = 20 if use_ai_kw else (len(keywords_final) if keywords_final else 20)
+        est_total = max(kw_count * 7, 20)  # 每词 7 秒，最少 20 秒
+
+        progress_bar = st.progress(0, "⏳ 准备中...")
+        status_text = st.empty()
+        eta_text = st.empty()
+
+        def _eta_text(phase: str, pct: int) -> str:
+            elapsed = time.time() - start_time
+            remaining = max(est_total - elapsed, 0)
+            rm, rs = int(remaining // 60), int(remaining % 60)
+            em, es = int(elapsed // 60), int(elapsed % 60)
+            if remaining > 60:
+                return f"⏱ {phase} | 预计还需 {rm} 分 {rs} 秒 | 已耗时 {em} 分 {es} 秒"
+            elif remaining > 0:
+                return f"⏱ {phase} | 预计还需 {int(remaining)} 秒 | 已耗时 {em} 分 {es} 秒"
+            else:
+                return f"⏱ {phase} | 已耗时 {em} 分 {es} 秒"
+
+        try:
+            progress_bar.progress(5, "🤖 生成关键词...")
+            status_text.text(f"共 {kw_count} 个关键词，预计 {int(est_total // 60)} 分 {int(est_total % 60)} 秒")
+            eta_text.text(_eta_text("准备中", 5))
+
+            progress_bar.progress(15, "🔍 搜索中 (1/3)...")
+            status_text.text(f"CDP 连接中，逐关键词搜索，每个约 6-8 秒")
+            eta_text.text(_eta_text("搜索中", 15))
+
+            summary = run(
+                skip_keyword_expand=True,
+                skip_ai=skip_ai,
+                discover=False,
+                douyin_import=False,
+                enrich_remote=False,
+                keywords_override=keywords_final,
+                use_ai_keywords=use_ai_kw,
+                feedback_notes=fb,
+            )
+
+            progress_bar.progress(85, "📊 评分分类中...")
+            status_text.text(f"去重后 {summary['unique']} 条，正在评分分类")
+            eta_text.text(_eta_text("评分中", 85))
+
+            progress_bar.progress(95, "💾 保存...")
+            eta_text.text(_eta_text("保存中", 95))
+
+            elapsed = time.time() - start_time
+            em, es = int(elapsed // 60), int(elapsed % 60)
+            progress_bar.progress(100, "✅ 完成")
+            status_text.text("")
+            eta_text.text(f"✅ 总耗时 {em} 分 {es} 秒 | {summary['unique']} 条达人已就绪")
+            st.session_state["last_summary"] = summary
+            st.success(f"完成！{summary['unique']} 条达人，耗时 {em} 分 {es} 秒")
+        except Exception as e:
+            elapsed = time.time() - start_time
+            progress_bar.progress(100, "❌ 失败")
+            status_text.text("")
+            eta_text.text(f"❌ 运行 {int(elapsed)} 秒后失败: {e}")
+            st.error(f"运行失败：{e}")
 
 # ===== 主区域 =====
 summary = st.session_state.get("last_summary")
@@ -272,4 +318,4 @@ else:
                 update_creator_status(target, new_status, note)
                 st.success("已保存")
 
-st.caption(f"🕐 {datetime.now():%Y-%m-%d %H:%M:%S}")
+st.caption(f"🕐 页面刷新时间：{datetime.now():%Y-%m-%d %H:%M:%S}")
