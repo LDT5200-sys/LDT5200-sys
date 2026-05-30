@@ -14,71 +14,88 @@ CONFIG_DIR = ROOT / "config"
 DATA_DIR = ROOT / "data"
 
 
+def _get_secret(key: str, default: str = "") -> str:
+    """优先从 Streamlit secrets 读取，其次从环境变量，最后从 .env 文件。"""
+    # Streamlit Cloud secrets
+    try:
+        import streamlit as st
+        val = st.secrets.get(key, None)
+        if val is not None:
+            return str(val)
+    except Exception:
+        pass
+    # 环境变量
+    val = os.getenv(key)
+    if val is not None:
+        return val
+    return default
+
+
 @lru_cache(maxsize=1)
 def load_env() -> dict:
     env_path = ROOT / ".env"
     if env_path.exists():
         load_dotenv(env_path)
 
-    # 搜索 API：新名(SEARCH_API_*) 与旧名(SEARCH_*) 双写兼容，新名优先
+    # 搜索 API：新名(SEARCH_API_*) 与旧名(SEARCH_*) 双写兼容
     search_provider = (
-        os.getenv("SEARCH_API_PROVIDER", "")
-        or os.getenv("SEARCH_PROVIDER", "")
+        _get_secret("SEARCH_API_PROVIDER")
+        or _get_secret("SEARCH_PROVIDER")
     ).strip().lower()
     search_limit = int(
-        os.getenv("SEARCH_API_RESULT_LIMIT", "")
-        or os.getenv("SEARCH_RESULT_LIMIT", "")
+        _get_secret("SEARCH_API_RESULT_LIMIT")
+        or _get_secret("SEARCH_RESULT_LIMIT")
         or "20"
     )
 
     return {
         # ---- LLM ----
-        "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY", ""),
-        "OPENAI_BASE_URL": os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-        "OPENAI_MODEL": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-        "KEYWORD_MODEL": os.getenv("KEYWORD_MODEL", "") or os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-        "AI_TEMPERATURE": float(os.getenv("AI_TEMPERATURE", "0.2")),
-        "AI_MAX_TOKENS": int(os.getenv("AI_MAX_TOKENS", "1200")),
-        "AI_MAX_RETRIES": int(os.getenv("AI_MAX_RETRIES", "2")),
-        "ENABLE_AI": os.getenv("ENABLE_AI", "true").lower() in ("1", "true", "yes"),
+        "OPENAI_API_KEY": _get_secret("OPENAI_API_KEY"),
+        "OPENAI_BASE_URL": _get_secret("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+        "OPENAI_MODEL": _get_secret("OPENAI_MODEL", "gpt-4o-mini"),
+        "KEYWORD_MODEL": _get_secret("KEYWORD_MODEL", "") or _get_secret("OPENAI_MODEL", "gpt-4o-mini"),
+        "AI_TEMPERATURE": float(_get_secret("AI_TEMPERATURE", "0.2")),
+        "AI_MAX_TOKENS": int(_get_secret("AI_MAX_TOKENS", "1200")),
+        "AI_MAX_RETRIES": int(_get_secret("AI_MAX_RETRIES", "2")),
+        "ENABLE_AI": _get_secret("ENABLE_AI", "true").lower() in ("1", "true", "yes"),
 
         # ---- 搜索 API（公开候选发现） ----
         "SEARCH_API_PROVIDER": search_provider,
-        "SEARCH_API_KEY": os.getenv("SEARCH_API_KEY", "").strip(),
-        "SEARCH_API_BASE_URL": os.getenv("SEARCH_API_BASE_URL", "").strip(),
+        "SEARCH_API_KEY": _get_secret("SEARCH_API_KEY").strip(),
+        "SEARCH_API_BASE_URL": _get_secret("SEARCH_API_BASE_URL").strip(),
         "SEARCH_API_RESULT_LIMIT": search_limit,
-        "SEARCH_DOMAIN_FILTER": os.getenv(
+        "SEARCH_DOMAIN_FILTER": _get_secret(
             "SEARCH_DOMAIN_FILTER", "douyin.com,xingtu.cn,xiaohongshu.com"
         ).strip(),
 
-        # 旧字段保留为别名（仍被 public_search_adapter 等老代码读取）
+        # 旧字段保留为别名
         "SEARCH_PROVIDER": search_provider,
         "SEARCH_RESULT_LIMIT": search_limit,
 
         # ---- 抖音/授权数据源 ----
-        "DOUYIN_DATA_PROVIDER": (os.getenv("DOUYIN_DATA_PROVIDER", "") or "").strip().lower(),
-        "DOUYIN_API_KEY": os.getenv("DOUYIN_API_KEY", "").strip(),
-        "DOUYIN_API_SECRET": os.getenv("DOUYIN_API_SECRET", "").strip(),
-        "DOUYIN_ACCESS_TOKEN": os.getenv("DOUYIN_ACCESS_TOKEN", "").strip(),
-        "DOUYIN_API_BASE_URL": os.getenv("DOUYIN_API_BASE_URL", "").strip(),
+        "DOUYIN_DATA_PROVIDER": _get_secret("DOUYIN_DATA_PROVIDER").strip().lower(),
+        "DOUYIN_API_KEY": _get_secret("DOUYIN_API_KEY").strip(),
+        "DOUYIN_API_SECRET": _get_secret("DOUYIN_API_SECRET").strip(),
+        "DOUYIN_ACCESS_TOKEN": _get_secret("DOUYIN_ACCESS_TOKEN").strip(),
+        "DOUYIN_API_BASE_URL": _get_secret("DOUYIN_API_BASE_URL").strip(),
 
         # ---- 星图数据源 ----
-        "XINGTU_DATA_PROVIDER": (os.getenv("XINGTU_DATA_PROVIDER", "") or "").strip().lower(),
-        "XINGTU_API_KEY": os.getenv("XINGTU_API_KEY", "").strip(),
-        "XINGTU_API_SECRET": os.getenv("XINGTU_API_SECRET", "").strip(),
-        "XINGTU_ACCESS_TOKEN": os.getenv("XINGTU_ACCESS_TOKEN", "").strip(),
-        "XINGTU_API_BASE_URL": os.getenv("XINGTU_API_BASE_URL", "").strip(),
+        "XINGTU_DATA_PROVIDER": _get_secret("XINGTU_DATA_PROVIDER").strip().lower(),
+        "XINGTU_API_KEY": _get_secret("XINGTU_API_KEY").strip(),
+        "XINGTU_API_SECRET": _get_secret("XINGTU_API_SECRET").strip(),
+        "XINGTU_ACCESS_TOKEN": _get_secret("XINGTU_ACCESS_TOKEN").strip(),
+        "XINGTU_API_BASE_URL": _get_secret("XINGTU_API_BASE_URL").strip(),
 
         # ---- 第三方达人数据工具 ----
-        "THIRD_PARTY_PROVIDER": (os.getenv("THIRD_PARTY_PROVIDER", "") or "").strip().lower(),
-        "THIRD_PARTY_API_KEY": os.getenv("THIRD_PARTY_API_KEY", "").strip(),
-        "THIRD_PARTY_API_BASE_URL": os.getenv("THIRD_PARTY_API_BASE_URL", "").strip(),
+        "THIRD_PARTY_PROVIDER": _get_secret("THIRD_PARTY_PROVIDER").strip().lower(),
+        "THIRD_PARTY_API_KEY": _get_secret("THIRD_PARTY_API_KEY").strip(),
+        "THIRD_PARTY_API_BASE_URL": _get_secret("THIRD_PARTY_API_BASE_URL").strip(),
 
         # ---- 飞书 ----
-        "FEISHU_APP_ID": os.getenv("FEISHU_APP_ID", ""),
-        "FEISHU_APP_SECRET": os.getenv("FEISHU_APP_SECRET", ""),
-        "FEISHU_BITABLE_APP_TOKEN": os.getenv("FEISHU_BITABLE_APP_TOKEN", ""),
-        "FEISHU_BITABLE_TABLE_ID": os.getenv("FEISHU_BITABLE_TABLE_ID", ""),
+        "FEISHU_APP_ID": _get_secret("FEISHU_APP_ID"),
+        "FEISHU_APP_SECRET": _get_secret("FEISHU_APP_SECRET"),
+        "FEISHU_BITABLE_APP_TOKEN": _get_secret("FEISHU_BITABLE_APP_TOKEN"),
+        "FEISHU_BITABLE_TABLE_ID": _get_secret("FEISHU_BITABLE_TABLE_ID"),
     }
 
 
