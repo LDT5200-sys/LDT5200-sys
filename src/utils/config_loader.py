@@ -18,13 +18,16 @@ DATA_DIR = ROOT / "data"
 _DEFAULTS = {
     "SEARCH_API_PROVIDER": "bocha",
     "SEARCH_API_KEY": "sk-d6d73e45bfd748b0ba75f5111d44c803",
-    "ENABLE_AI": "false",
 }
 
 
 def _get_secret(key: str, default: str = "") -> str:
-    """多层兜底：st.secrets → 环境变量 → .env → 硬编码默认值"""
-    # 1. Streamlit Cloud secrets
+    """多层兜底：环境变量 → st.secrets → .env → 硬编码默认值"""
+    # 1. 环境变量（最高优先级，用户显式设置）
+    val = os.getenv(key)
+    if val is not None and val != "":
+        return str(val)
+    # 2. Streamlit Cloud secrets
     try:
         import streamlit as st
         val = st.secrets.get(key) if hasattr(st.secrets, "get") else None
@@ -33,15 +36,11 @@ def _get_secret(key: str, default: str = "") -> str:
                 val = st.secrets[key]
             except (KeyError, TypeError):
                 pass
-        if val is not None and str(val) != "":
+        if val is not None and str(val) != "" and str(val).lower() != "false":
             return str(val)
     except Exception:
         pass
-    # 2. 环境变量
-    val = os.getenv(key)
-    if val is not None and val != "":
-        return str(val)
-    # 3. .env 文件（由 python-dotenv 注入到 os.environ）
+    # 3. .env 文件（由 python-dotenv 注入）
     # 4. 硬编码默认值
     if key in _DEFAULTS:
         return str(_DEFAULTS[key])
