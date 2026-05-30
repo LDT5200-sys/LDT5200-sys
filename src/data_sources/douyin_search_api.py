@@ -127,6 +127,9 @@ class DouyinSearchAPI(BaseDataSource):
         return self._session
 
     def fetch(self) -> list[dict[str, Any]]:
+        global _profile_cache
+        _profile_cache = {}  # 每次运行清缓存
+
         if not self.enabled:
             return []
 
@@ -134,7 +137,6 @@ class DouyinSearchAPI(BaseDataSource):
             self._keywords = list(
                 seed_keywords_config().get("seed_keywords", []) or []
             )
-
         if not self._keywords:
             logger.warning(f"[{self.name}] 无关键词")
             return []
