@@ -14,7 +14,7 @@ logger = get_logger()
 
 
 _TOP_COLUMNS_CN = [
-    "排名", "推荐等级", "AI评分", "达人昵称", "平台", "粉丝数", "内容类型",
+    "排名", "是否新达人", "推荐等级", "AI评分", "达人昵称", "平台", "粉丝数", "内容类型",
     "是否接近果子模式", "推荐产品", "合作建议", "推荐理由", "风险点", "下一步动作",
     "达人主页链接", "代表视频链接", "链接类型",
     "公开联系方式", "联系方式类型", "联系方式位置",
@@ -38,13 +38,42 @@ def _to_chinese(df: pd.DataFrame) -> pd.DataFrame:
     return df.rename(columns={k: v for k, v in headers.items() if k in df.columns})
 
 
+def _get_new_creators(date: str) -> set:
+    """从 SQLite 获取今天之前就存在的 creator_key 集合"""
+    try:
+        import sqlite3
+        db = DATA_DIR / "database" / "creator_finder.db"
+        if not db.exists():
+            return set()
+        conn = sqlite3.connect(str(db))
+        rows = conn.execute(
+            "SELECT creator_key FROM creators WHERE first_seen_date < ?", (date,)
+        ).fetchall()
+        conn.close()
+        return {r[0] for r in rows}
+    except Exception:
+        return set()
+
+
 def _build_top(df: pd.DataFrame, top_n: int = 50) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=_TOP_COLUMNS_CN)
     ranked = df[df["priority_level"].isin(["S", "A", "B", "C"])].copy()
     ranked = ranked.sort_values("ai_score", ascending=False).head(top_n).fillna("")
+
+    # 标记是否新达人（用 creator_id 查 SQLite 历史）
+    from src.utils.time_utils import today_str
+    old_creators = _get_new_creators(today_str("%Y-%m-%d"))
+    if "creator_id" in ranked.columns:
+        ranked["是否新达人"] = ranked["creator_id"].apply(
+            lambda cid: "🆕新" if (str(cid) and str(cid) not in old_creators) else "历史"
+        )
+    else:
+        ranked["是否新达人"] = ""
+
     ranked.insert(0, "排名", range(1, len(ranked) + 1))
     ranked = ranked.rename(columns={
+        "是否新达人": "是否新达人",
         "priority_level": "推荐等级",
         "ai_score": "AI评分",
         "creator_name": "达人昵称",

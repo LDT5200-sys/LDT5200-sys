@@ -279,6 +279,12 @@ def score_records(records: list[CreatorRecord]) -> list[CreatorRecord]:
             if not rec.creator_profile_url or not rec.video_url:
                 rec.priority_level = "A"
 
+        # 内容类型弱匹配约束：泛穿搭最高 B，泛生活方式最高 C
+        if rec.content_type == "泛穿搭" and rec.priority_level in ("S", "A"):
+            rec.priority_level = "B"
+        elif rec.content_type == "泛生活方式" and rec.priority_level in ("S", "A", "B"):
+            rec.priority_level = "C"
+
         rec.cooperation_suggestion = coop_map.get(rec.priority_level, "暂不建议")
         rec.next_action = _next_action(rec.priority_level)
 
