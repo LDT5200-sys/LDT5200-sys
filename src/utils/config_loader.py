@@ -37,7 +37,6 @@ def _get_secret(key: str, default: str = "") -> str:
     return default
 
 
-@lru_cache(maxsize=1)
 def load_env() -> dict:
     env_path = ROOT / ".env"
     if env_path.exists():
