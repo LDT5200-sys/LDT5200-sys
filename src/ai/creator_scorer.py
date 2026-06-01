@@ -223,6 +223,42 @@ def _ai_refine(rec: CreatorRecord, llm: LLMClient) -> dict | None:
         return None
 
 
+def _is_store_account(rec: CreatorRecord) -> bool:
+    """检测是否为店铺/品牌号而非个人达人"""
+    name = (rec.creator_name or "").lower()
+    bio = (rec.creator_bio or "").lower()
+    tags = (rec.tags or "").lower()
+    combined = f"{name} {bio} {tags}"
+
+    # 品牌/店铺关键词
+    store_signals = [
+        "旗舰店", "官方店", "品牌店", "专卖店", "直营店",
+        "服饰店", "男装店", "商城", "店铺", "橱窗",
+        "正品", "工厂", "源头", "批发", "一件代发",
+        "限时折扣", "秒杀", "包邮", "下单", "点击购买",
+        "shop", "store",
+    ]
+    # 达人信号（排除项）
+    creator_signals = [
+        "测评", "穿搭", "改造", "避雷", "推荐", "试穿", "分享",
+        "ootd", "日常", "生活", "vlog", "博主",
+        "男生", "女生", "微胖", "大码", "小个子", "梨形",
+    ]
+
+    has_store = any(kw in combined for kw in store_signals)
+    has_creator = any(kw in combined for kw in creator_signals)
+
+    # 有店铺信号且无达人信号 → 判定为店铺号
+    if has_store and not has_creator:
+        return True
+
+    # 昵称只有品牌名（无个人特征）
+    if len(name) <= 4 and has_store:
+        return True
+
+    return False
+
+
 def _fmt_followers(v) -> str:
     """数字转万单位"""
     if v is None:
@@ -351,6 +387,12 @@ def score_records(records: list[CreatorRecord]) -> list[CreatorRecord]:
         if rec.priority_level == "S":
             if not rec.creator_profile_url or not rec.video_url:
                 rec.priority_level = "A"
+
+        # 店铺/品牌号检测：直接淘汰
+        if _is_store_account(rec):
+            rec.priority_level = "淘汰"
+            rec.cooperation_suggestion = "暂不建议（店铺/品牌号，非达人）"
+            rec.risk_reason = (rec.risk_reason or "") + "；疑似店铺/品牌账号，非个人达人"
 
         # 内容类型弱匹配约束：泛穿搭最高 B，泛生活方式最高 C
         if rec.content_type == "泛穿搭" and rec.priority_level in ("S", "A"):

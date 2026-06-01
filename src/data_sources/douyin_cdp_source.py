@@ -104,7 +104,7 @@ class DouyinCDPSource(BaseDataSource):
                         seen_vids.add(vid)
                         rows.append(r)
                 logger.info(f"[{self.name}] kw={kw} → {len(batch)} 条")
-                time.sleep(1.2)
+                time.sleep(0.3)
 
             ws.close()
         except Exception as e:
@@ -114,13 +114,13 @@ class DouyinCDPSource(BaseDataSource):
         return rows
 
 
-def _cdp_send(ws, method: str, params: dict | None = None) -> dict:
+def _cdp_send(ws, method: str, params: dict | None = None, timeout: float = 10) -> dict:
     """通过 websocket 发送 CDP 命令并等待结果"""
     import json as _json
     mid = int(time.time() * 1000) % 1000000
     ws.send(_json.dumps({"id": mid, "method": method, "params": params or {}}))
     t0 = time.time()
-    while time.time() - t0 < 25:
+    while time.time() - t0 < timeout:
         try:
             resp = _json.loads(ws.recv())
             if resp.get("id") == mid:
@@ -179,7 +179,8 @@ def _search_via_ws(ws, keyword: str) -> list[dict[str, Any]]:
         signature = item.get("signature", "")
         follower_count = int(item.get("follower_count", 0))
 
-        if sec_uid and not signature:
+        if sec_uid and not signature and len(records) < 3:
+            # 只对每关键词前3条补全简介，节省时间
             profile = _enrich_profile_ws(ws, sec_uid)
             signature = profile.get("signature", "")
             if profile.get("follower_count"):
