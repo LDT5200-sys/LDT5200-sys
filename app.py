@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sys
 import time
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -52,45 +53,36 @@ def check_douyin_session() -> tuple[bool, str]:
 
 def get_run_stats() -> dict:
     """读取历史运行统计"""
-    import sqlite3
+    import sqlite3, os
     db_path = DATA_DIR / "database" / "creator_finder.db"
+    result = {"today_runs": 0, "today_creators": 0, "total_creators": 0, "last_run": "从未"}
     if not db_path.exists():
-        return {"today_runs": 0, "today_creators": 0, "total_creators": 0, "last_run": "从未"}
+        return result
     try:
         conn = sqlite3.connect(str(db_path))
         today = datetime.now().strftime("%Y-%m-%d")
-        today_runs = conn.execute(
+        result["today_runs"] = conn.execute(
             "SELECT COUNT(DISTINCT run_date) FROM daily_results WHERE run_date = ?", (today,)
-        ).fetchone()[0]
-        today_creators = conn.execute(
+        ).fetchone()[0] or 0
+        result["today_creators"] = conn.execute(
             "SELECT COUNT(DISTINCT creator_key) FROM daily_results WHERE run_date = ?", (today,)
-        ).fetchone()[0]
-        total_creators = conn.execute("SELECT COUNT(*) FROM creators").fetchone()[0]
-        last = conn.execute("SELECT MAX(run_date) FROM daily_results").fetchone()[0]
-        if last and last != "从未":
-            # 取这个日期的最后写入时间
-            last_time = conn.execute(
-                "SELECT MAX(rowid) FROM daily_results WHERE run_date = ?", (last,)
-            ).fetchone()[0]
-            # 用 SQLite 文件修改时间来推断时间
-            last_run = f"{last}"
-        else:
-            last_run = "从未"
-        # 用数据库文件的修改时间来推算最近一次运行时间
-        import os
+        ).fetchone()[0] or 0
+        result["total_creators"] = conn.execute("SELECT COUNT(*) FROM creators").fetchone()[0] or 0
+        conn.close()
         mtime = os.path.getmtime(str(db_path))
         last_dt = datetime.fromtimestamp(mtime)
-        if last and last != "从未":
-            last_run = f"{last} {last_dt:%H:%M}"
-        conn.close()
-        return {"today_runs": today_runs, "today_creators": today_creators,
-                "total_creators": total_creators, "last_run": last_run}
+        result["last_run"] = f"{last_dt:%Y-%m-%d %H:%M}"
+        return result
     except Exception:
-        return {"today_runs": 0, "today_creators": 0, "total_creators": 0, "last_run": "?"}
+        return result
 
 cdp_ok, cdp_browser = check_cdp()
 session_ok, session_info = check_douyin_session()
 stats = get_run_stats()
+last_run_info = st.session_state.get("last_run_stats", {})
+if last_run_info:
+    stats["last_run"] = last_run_info.get("runtime", stats["last_run"])
+    stats["today_creators"] = max(stats["today_creators"], last_run_info.get("creators", 0))
 
 # 状态面板
 stcols = st.columns(4)
@@ -105,7 +97,7 @@ with stcols[1]:
     else:
         st.error("🔴 需重新登录")
 with stcols[2]:
-    st.info(f"📊 今日 {stats['today_creators']} 达人")
+    st.info(f"📊 本次 {stats['today_creators']} 达人")
 with stcols[3]:
     st.info(f"⏱ 上次 {stats['last_run']}")
 
@@ -181,66 +173,86 @@ with st.sidebar:
             fb = [feedback_notes] if feedback_notes.strip() else None
 
         start_time = time.time()
-        # 估算：每个关键词约 6 秒（搜索+补全简介），20 个关键词约 120 秒
         kw_count = 20 if use_ai_kw else (len(keywords_final) if keywords_final else 20)
-        est_total = max(kw_count * 7, 20)  # 每词 7 秒，最少 20 秒
+        # 更准确的预估：每词约 10-12 秒（搜索+补全简介），加评分和写库约 30 秒
+        est_total = max(kw_count * 12 + 30, 30)
 
         progress_bar = st.progress(0, "⏳ 准备中...")
         status_text = st.empty()
         eta_text = st.empty()
 
-        def _eta_text(phase: str, pct: int) -> str:
+        result_holder = {"summary": None, "error": None, "done": False}
+        first_result_time = {"t": None}
+
+        def _run_pipeline():
+            try:
+                result_holder["summary"] = run(
+                    skip_keyword_expand=True, skip_ai=skip_ai,
+                    discover=False, douyin_import=False, enrich_remote=False,
+                    keywords_override=keywords_final,
+                    use_ai_keywords=use_ai_kw, feedback_notes=fb,
+                )
+            except Exception as e:
+                result_holder["error"] = str(e)
+            result_holder["done"] = True
+
+        thread = threading.Thread(target=_run_pipeline, daemon=True)
+        thread.start()
+
+        # 动态进度：前 80% 基于时间估算，后 20% 等实际完成
+        while not result_holder["done"]:
             elapsed = time.time() - start_time
-            remaining = max(est_total - elapsed, 0)
+
+            # 动态调整预估：如果超过原始预估，按比例扩展
+            adjusted_est = est_total
+            if elapsed > est_total * 0.8:
+                adjusted_est = elapsed * 1.3  # 实际时间的 1.3 倍
+
+            progress_pct = min(elapsed / adjusted_est * 100, 92)
+            remaining = max(adjusted_est - elapsed, 0)
+            em, es = int(elapsed // 60), int(elapsed % 60)
             rm, rs = int(remaining // 60), int(remaining % 60)
-            em, es = int(elapsed // 60), int(elapsed % 60)
-            if remaining > 60:
-                return f"⏱ {phase} | 预计还需 {rm} 分 {rs} 秒 | 已耗时 {em} 分 {es} 秒"
-            elif remaining > 0:
-                return f"⏱ {phase} | 预计还需 {int(remaining)} 秒 | 已耗时 {em} 分 {es} 秒"
+
+            # 阶段文字
+            if progress_pct < 10:
+                phase = "🤖 准备中..."
+            elif progress_pct < 80:
+                phase = "🔍 搜索中..."
             else:
-                return f"⏱ {phase} | 已耗时 {em} 分 {es} 秒"
+                phase = "📊 评分/保存中..."
 
-        try:
-            progress_bar.progress(5, "🤖 生成关键词...")
-            status_text.text(f"共 {kw_count} 个关键词，预计 {int(est_total // 60)} 分 {int(est_total % 60)} 秒")
-            eta_text.text(_eta_text("准备中", 5))
+            progress_bar.progress(int(progress_pct), phase)
+            status_text.text(f"{kw_count} 个关键词 | 已耗时 {em} 分 {es} 秒")
 
-            progress_bar.progress(15, "🔍 搜索中 (1/3)...")
-            status_text.text(f"CDP 连接中，逐关键词搜索，每个约 6-8 秒")
-            eta_text.text(_eta_text("搜索中", 15))
+            if remaining > 60:
+                eta_text.text(f"⏱ 预计还需 {rm} 分 {rs} 秒")
+            elif remaining > 0:
+                eta_text.text(f"⏱ 预计还需 {int(remaining)} 秒")
+            else:
+                eta_text.text(f"⏱ 即将完成...")
 
-            summary = run(
-                skip_keyword_expand=True,
-                skip_ai=skip_ai,
-                discover=False,
-                douyin_import=False,
-                enrich_remote=False,
-                keywords_override=keywords_final,
-                use_ai_keywords=use_ai_kw,
-                feedback_notes=fb,
-            )
+            time.sleep(1)
 
-            progress_bar.progress(85, "📊 评分分类中...")
-            status_text.text(f"去重后 {summary['unique']} 条，正在评分分类")
-            eta_text.text(_eta_text("评分中", 85))
+        # 完成
+        thread.join(timeout=5)
+        elapsed = time.time() - start_time
+        em, es = int(elapsed // 60), int(elapsed % 60)
 
-            progress_bar.progress(95, "💾 保存...")
-            eta_text.text(_eta_text("保存中", 95))
-
-            elapsed = time.time() - start_time
-            em, es = int(elapsed // 60), int(elapsed % 60)
+        if result_holder["error"]:
+            progress_bar.progress(100, "❌ 失败")
+            eta_text.text(f"❌ {em} 分 {es} 秒后失败")
+            st.error(f"运行失败：{result_holder['error']}")
+        else:
+            summary = result_holder["summary"]
             progress_bar.progress(100, "✅ 完成")
             status_text.text("")
             eta_text.text(f"✅ 总耗时 {em} 分 {es} 秒 | {summary['unique']} 条达人已就绪")
             st.session_state["last_summary"] = summary
+            st.session_state["last_run_stats"] = {
+                "runtime": f"{datetime.now():%H:%M}",
+                "creators": summary["unique"],
+            }
             st.success(f"完成！{summary['unique']} 条达人，耗时 {em} 分 {es} 秒")
-        except Exception as e:
-            elapsed = time.time() - start_time
-            progress_bar.progress(100, "❌ 失败")
-            status_text.text("")
-            eta_text.text(f"❌ 运行 {int(elapsed)} 秒后失败: {e}")
-            st.error(f"运行失败：{e}")
 
 # ===== 主区域 =====
 summary = st.session_state.get("last_summary")
@@ -260,7 +272,7 @@ else:
     latest = xlsx_files[0]
     st.caption(f"最新结果：{latest.name}")
 
-    tab1, tab2, tab3 = st.tabs(["Top 推荐", "全部候选", "人工标注"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Top 推荐", "全部候选", "人工标注", "反向评估"])
 
     with tab1:
         try:
@@ -333,5 +345,69 @@ else:
             if st.button("💾 保存状态"):
                 update_creator_status(target, new_status, note)
                 st.success("已保存")
+
+    with tab4:
+        st.subheader("🔍 反向评估达人")
+        st.caption("输入达人主页链接、视频链接或抖音 sec_uid，AI 自动拉取数据并深度分析")
+
+        eval_input = st.text_area(
+            "达人链接/ID（每行一个，支持批量）",
+            placeholder="https://www.douyin.com/user/MS4wLjABAAAAxxx...\nhttps://www.douyin.com/user/MS4wLjABAAAAyyy...",
+            height=100,
+        )
+
+        eval_mode = st.radio("评估模式", ["标准评估", "竞品分析"], horizontal=True)
+
+        if st.button("🔍 开始评估", key="eval_btn"):
+            inputs = [l.strip() for l in eval_input.split("\n") if l.strip()]
+            if not inputs:
+                st.warning("请输入至少一个达人链接或ID")
+            else:
+                with st.spinner(f"正在分析 {len(inputs)} 个达人..."):
+                    from src.ai.creator_reverse_evaluator import batch_analyze, analyze_creator
+
+                    if len(inputs) == 1:
+                        result = analyze_creator(inputs[0])
+                        results = [result]
+                    else:
+                        results = batch_analyze(inputs)
+
+                for i, r in enumerate(results):
+                    if "error" in r:
+                        st.error(f"❌ {r['error']}")
+                        continue
+
+                    ai = r.get("ai_analysis", {})
+                    with st.expander(f"{'🥇' if i==0 else '📋'} {r.get('nickname','?')} — {ai.get('overall_score',0)}分 | {ai.get('priority_level','?')}级", expanded=(i == 0)):
+                        c1, c2, c3, c4 = st.columns(4)
+                        c1.metric("综合评分", f"{ai.get('overall_score',0)}/100")
+                        c2.metric("推荐等级", ai.get('priority_level', '?'))
+                        c3.metric("粉丝数", f"{r.get('follower_count',0):,}")
+                        c4.metric("合作建议", ai.get('cooperation_suggestion', '?'))
+
+                        st.markdown(f"**推荐理由**：{ai.get('recommend_reason', '?')}")
+                        st.markdown(f"**推荐产品**：{ai.get('recommended_product', '?')}")
+
+                        col_a, col_b = st.columns(2)
+                        with col_a:
+                            st.markdown(f"📊 内容匹配({ai.get('content_fit_score',0)}/30)：{ai.get('content_fit_reason','?')}")
+                            st.markdown(f"📊 数据表现({ai.get('data_performance_score',0)}/20)：{ai.get('data_performance_reason','?')}")
+                            st.markdown(f"📊 达人量级({ai.get('creator_scale_score',0)}/15)：{ai.get('creator_scale_reason','?')}")
+                        with col_b:
+                            st.markdown(f"📊 合作可行性({ai.get('cooperation_score',0)}/15)：{ai.get('cooperation_reason','?')}")
+                            st.markdown(f"📊 素材复用({ai.get('reuse_score',0)}/10)：{ai.get('reuse_reason','?')}")
+                            st.markdown(f"⚠️ 风险({ai.get('risk_score',0)}/10)：{ai.get('risk_reason','?')}")
+
+                        if eval_mode == "竞品分析":
+                            st.info(f"**竞品分析**：{ai.get('competitor_analysis','?')}")
+                        st.caption(f"**下一步**：{ai.get('next_action','?')}")
+                        st.caption(f"主页：{r.get('profile_url','')}")
+
+                        # 展示最近视频
+                        videos = r.get("recent_videos", [])
+                        if videos:
+                            st.markdown("**最近视频**：")
+                            for v in videos[:5]:
+                                st.markdown(f"- [{v['desc'][:60]}]({v['video_url']}) | 👍{v['likes']} 💬{v['comments']} ↗{v['shares']}")
 
 st.caption(f"🕐 页面刷新时间：{datetime.now():%Y-%m-%d %H:%M:%S}")
