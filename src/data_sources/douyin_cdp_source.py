@@ -45,11 +45,10 @@ class DouyinCDPSource(BaseDataSource):
             self._keywords = list(seed_keywords_config().get("seed_keywords", []) or [])
 
         if not _cdp_available():
+            from src.utils.config_loader import cdp_chrome_command
             logger.warning(
                 f"[{self.name}] CDP 不可用。请用以下命令重启 Chrome:\n"
-                f'  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" '
-                f'--remote-debugging-port=9222 "--remote-allow-origins=*" '
-                f'--user-data-dir="/tmp/cdp-chrome-profile" &'
+                f"{cdp_chrome_command()}"
             )
             return []
 

@@ -309,9 +309,8 @@ def _parse_json(s: str) -> dict | None:
 def _load_cookies() -> dict[str, str]:
     try:
         import browser_cookie3
-        from pathlib import Path
-        chrome = Path.home() / "Library/Application Support/Google/Chrome"
-        for db in sorted(chrome.glob("*/Cookies"), key=lambda p: p.stat().st_mtime, reverse=True):
+        from src.utils.config_loader import chrome_cookie_dirs
+        for db in chrome_cookie_dirs():
             try:
                 cookies = list(browser_cookie3.chrome(cookie_file=str(db)))
                 douyin = {c.name: c.value for c in cookies if "douyin" in c.domain and c.value}

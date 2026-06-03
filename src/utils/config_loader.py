@@ -152,6 +152,42 @@ def seed_keywords_config() -> dict:
     return _read_yaml("seed_keywords.yaml")
 
 
+def chrome_cookie_dirs() -> list[Path]:
+    """返回各平台 Chrome 用户数据目录（按 Profile 修改时间倒序）。"""
+    import platform
+    system = platform.system()
+    if system == "Darwin":
+        base = Path.home() / "Library/Application Support/Google/Chrome"
+    elif system == "Windows":
+        base = Path.home() / "AppData/Local/Google/Chrome/User Data"
+    else:
+        base = Path.home() / ".config/google-chrome"
+    if not base.exists():
+        return []
+    return sorted(base.glob("*/Cookies"), key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def cdp_chrome_command() -> str:
+    """返回当前平台的 CDP Chrome 启动命令。"""
+    import platform
+    if platform.system() == "Windows":
+        return (
+            '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" ^\n'
+            '  --remote-debugging-port=9222 ^\n'
+            '  "--remote-allow-origins=*" ^\n'
+            '  --user-data-dir="%TEMP%\\cdp-chrome-profile" ^\n'
+            '  "https://www.douyin.com/"'
+        )
+    else:
+        return (
+            '"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \\\n'
+            '  --remote-debugging-port=9222 \\\n'
+            '  "--remote-allow-origins=*" \\\n'
+            '  --user-data-dir="/tmp/cdp-chrome-profile" \\\n'
+            '  "https://www.douyin.com/" &'
+        )
+
+
 @lru_cache(maxsize=1)
 def scoring_rules() -> dict:
     return _read_yaml("scoring_rules.yaml")

@@ -70,12 +70,11 @@ def _generate_ms_token() -> str:
 def _load_all_profile_cookies() -> list[tuple[str, dict[str, str]]]:
     """从本机 Chrome 所有 Profile 提取抖音 cookies，返回 [(profile_name, cookies), ...]"""
     import browser_cookie3
-    from pathlib import Path
+    from src.utils.config_loader import chrome_cookie_dirs
 
-    chrome_dir = Path.home() / "Library/Application Support/Google/Chrome"
     results: list[tuple[str, dict[str, str]]] = []
 
-    for db_path in sorted(chrome_dir.glob("*/Cookies"), key=lambda p: p.stat().st_mtime, reverse=True):
+    for db_path in chrome_cookie_dirs():
         try:
             raw = list(browser_cookie3.chrome(cookie_file=str(db_path)))
             profile_cookies = {c.name: c.value for c in raw if "douyin" in c.domain and c.value}

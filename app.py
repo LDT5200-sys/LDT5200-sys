@@ -154,9 +154,8 @@ def check_douyin_session() -> tuple[bool, str]:
     """检测抖音登录态是否有效"""
     try:
         import browser_cookie3
-        from pathlib import Path
-        chrome = Path.home() / "Library/Application Support/Google/Chrome"
-        for db in sorted(chrome.glob("*/Cookies"), key=lambda p: p.stat().st_mtime, reverse=True):
+        from src.utils.config_loader import chrome_cookie_dirs
+        for db in chrome_cookie_dirs():
             try:
                 cookies = list(browser_cookie3.chrome(cookie_file=str(db)))
                 douyin = [c for c in cookies if 'douyin' in c.domain]
@@ -221,13 +220,8 @@ with stcols[4]:
 # CDP 离线时显示启动命令
 if not cdp_ok:
     with st.expander("🔧 CDP Chrome 启动命令（点击展开）"):
-        st.code(
-            '"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \\\n'
-            '  --remote-debugging-port=9222 \\\n'
-            '  "--remote-allow-origins=*" \\\n'
-            '  --user-data-dir="/tmp/cdp-chrome-profile" \\\n'
-            '  "https://www.douyin.com/" &'
-        )
+        from src.utils.config_loader import cdp_chrome_command
+        st.code(cdp_chrome_command())
         st.caption("在终端粘贴运行后，刷新本页面。CDP Chrome 窗口不要关，每天开着就行。")
 
 if not session_ok:
