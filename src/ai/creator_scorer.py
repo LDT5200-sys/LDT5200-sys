@@ -19,14 +19,16 @@ def _score_content_match(rec: CreatorRecord, dim: dict) -> float:
     max_score = float(dim.get("max", 30))
 
     if rec.content_type in (
-        "女生测男装", "女穿男装", "男装测评", "短袖测评",
+        "女穿男装", "男装测评", "短袖测评",
         "微胖/大码男装", "通勤户外穿搭", "机能/战术/户外",
     ):
         return max_score
+    if rec.content_type == "女生测男装":
+        return max_score * 0.85
     if rec.content_type == "男友穿搭改造":
-        return max_score * 0.9
+        return max_score * 0.70
     if rec.content_type == "泛穿搭":
-        base = max_score * 0.55
+        base = max_score * 0.70
     elif rec.content_type == "泛生活方式":
         base = max_score * 0.3
     elif rec.content_type == "不相关":
@@ -296,6 +298,10 @@ def _is_waste_account(rec: CreatorRecord) -> tuple:
         "图文作品", "图文创作", "图片分享", "每日壁纸", "壁纸分享",
         "头像", "表情包", "日签", "早安语录", "晚安语录",
         "写真", "摄影作品", "插画", "每日一图", "图文号",
+        "图文带货", "图文直发", "好物图文", "图文种草",
+        "不出镜", "不露脸", "非真人",
+        "素材号", "切片", "搬运",
+        "文案号", "语录号", "摘抄",
     ]
     # AI生成信号（数字人/虚拟人，非真人出镜）
     ai_signals = [
@@ -470,10 +476,8 @@ def score_records(records: list[CreatorRecord]) -> list[CreatorRecord]:
             rec.cooperation_suggestion = "暂不建议（店铺/品牌号，非达人）"
             rec.risk_reason = (rec.risk_reason or "") + "；疑似店铺/品牌账号，非个人达人"
 
-        # 内容类型弱匹配约束：泛穿搭最高 B，泛生活方式最高 C
-        if rec.content_type == "泛穿搭" and rec.priority_level in ("S", "A"):
-            rec.priority_level = "B"
-        elif rec.content_type == "泛生活方式" and rec.priority_level in ("S", "A", "B"):
+        # 内容类型弱匹配约束：泛生活方式最高 C
+        if rec.content_type == "泛生活方式" and rec.priority_level in ("S", "A", "B"):
             rec.priority_level = "C"
 
         # 废号检测：图文号 / AI生成号 → 最高 C
