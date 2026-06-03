@@ -157,6 +157,8 @@ def _search_via_ws(ws, keyword: str) -> list[dict[str, Any]]:
                     comment_count: st.comment_count||0,
                     share_count: st.share_count||0,
                     collect_count: st.collect_count||0,
+                    anchors: (a.anchors||[]).length,
+                    is_ads: a.is_ads||false,
                 }};
             }}));
         }})()
@@ -179,14 +181,20 @@ def _search_via_ws(ws, keyword: str) -> list[dict[str, Any]]:
         signature = item.get("signature", "")
         follower_count = int(item.get("follower_count", 0))
 
+        douyin_id = ""
         if sec_uid and not signature and len(records) < 3:
             # 只对每关键词前3条补全简介，节省时间
             profile = _enrich_profile_ws(ws, sec_uid)
             signature = profile.get("signature", "")
             if profile.get("follower_count"):
                 follower_count = int(profile["follower_count"])
+            douyin_id = profile.get("short_id") or profile.get("unique_id", "")
 
         desc = item.get("aweme_desc", "")
+        # 是否挂车：有广告标记或有 anchors（含商品锚点）→ 是
+        is_ads = item.get("is_ads", False)
+        anchor_count = int(item.get("anchors", 0))
+        has_product = "是" if (is_ads or anchor_count > 0) else "否"
 
         records.append({
             "采集日期": today_str("%Y-%m-%d"),
@@ -194,11 +202,13 @@ def _search_via_ws(ws, keyword: str) -> list[dict[str, Any]]:
             "平台": "douyin",
             "搜索关键词": item.get("kw", keyword),
             "达人昵称": item.get("nickname", ""),
+            "抖音号": douyin_id,
             "达人ID": sec_uid or item.get("uid", ""),
             "达人主页链接": profile_url,
             "视频链接": video_url,
             "视频标题": desc,
             "视频描述": desc,
+            "是否挂车": has_product,
             "发布时间": str(item.get("create_time", "")),
             "点赞数": int(item.get("digg_count", 0)),
             "评论数": int(item.get("comment_count", 0)),
@@ -230,6 +240,8 @@ def _enrich_profile_ws(ws, sec_uid: str) -> dict:
                     signature: u.signature||'',
                     follower_count: u.follower_count||0,
                     nickname: u.nickname||'',
+                    short_id: u.short_id||'',
+                    unique_id: u.unique_id||'',
                 }});
             }})()
             """,
@@ -286,6 +298,7 @@ def _search_via_page(page, keyword: str) -> list[dict[str, Any]]:
         video_url = f"https://www.douyin.com/video/{aweme_id}" if aweme_id else ""
         signature = item.get("signature", "")
         follower_count = int(item.get("follower_count", 0))
+        douyin_id = ""
 
         # 补全用户主页详情（搜索 API 不返 signature，单独调）
         if sec_uid and not signature:
@@ -293,8 +306,13 @@ def _search_via_page(page, keyword: str) -> list[dict[str, Any]]:
             signature = profile.get("signature", "")
             if profile.get("follower_count"):
                 follower_count = int(profile["follower_count"])
+            douyin_id = profile.get("short_id") or profile.get("unique_id", "")
 
         desc = item.get("aweme_desc", "")
+        # 是否挂车：有广告标记或有 anchors（含商品锚点）→ 是
+        is_ads = item.get("is_ads", False)
+        anchor_count = int(item.get("anchors", 0))
+        has_product = "是" if (is_ads or anchor_count > 0) else "否"
 
         records.append({
             "采集日期": today_str("%Y-%m-%d"),
@@ -302,11 +320,13 @@ def _search_via_page(page, keyword: str) -> list[dict[str, Any]]:
             "平台": "douyin",
             "搜索关键词": item.get("kw", keyword),
             "达人昵称": item.get("nickname", ""),
+            "抖音号": douyin_id,
             "达人ID": sec_uid or item.get("uid", ""),
             "达人主页链接": profile_url,
             "视频链接": video_url,
             "视频标题": desc,
             "视频描述": desc,
+            "是否挂车": has_product,
             "发布时间": str(item.get("create_time", "")),
             "点赞数": int(item.get("digg_count", 0)),
             "评论数": int(item.get("comment_count", 0)),
@@ -339,6 +359,8 @@ def _enrich_profile_cdp(page, sec_uid: str) -> dict:
                 signature: u.signature||'',
                 follower_count: u.follower_count||0,
                 nickname: u.nickname||'',
+                    short_id: u.short_id||'',
+                    unique_id: u.unique_id||'',
             }});
         }}
         """)

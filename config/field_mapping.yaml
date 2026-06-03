@@ -19,6 +19,11 @@ standard_fields:
     - 关键词
     - keyword
     - search_keyword
+  douyin_id:
+    - 抖音号
+    - douyin_id
+    - short_id
+    - unique_id
   creator_name:
     - 达人昵称
     - 昵称
@@ -120,6 +125,12 @@ standard_fields:
   contact_type:
     - 联系方式类型
     - contact_type
+  has_product_link:
+    - 是否挂车
+    - 挂车
+    - has_product_link
+    - is_with_goods
+    - show_shop_window
   source_url:
     - 数据来源链接
     - 来源链接
@@ -148,6 +159,7 @@ output_chinese_headers:
   platform: 平台
   search_keyword: 搜索关键词
   creator_name: 达人昵称
+  douyin_id: 抖音号
   creator_id: 达人ID
   creator_profile_url: 达人主页链接
   video_url: 代表视频链接
@@ -165,6 +177,7 @@ output_chinese_headers:
   contact_text: 公开联系方式
   contact_type: 联系方式类型
   contact_location: 联系方式位置
+  has_product_link: 是否挂车
   source_url: 数据来源链接
   url_type: 链接类型
   extraction_status: 提取状态

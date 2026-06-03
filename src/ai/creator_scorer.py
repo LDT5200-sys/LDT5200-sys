@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from src.ai.llm_client import LLMClient, LLMUnavailable
 from src.models.schemas import CreatorRecord
@@ -225,38 +226,113 @@ def _ai_refine(rec: CreatorRecord, llm: LLMClient) -> dict | None:
 
 def _is_store_account(rec: CreatorRecord) -> bool:
     """检测是否为店铺/品牌号而非个人达人"""
-    name = (rec.creator_name or "").lower()
+    name = (rec.creator_name or "")
+    name_l = name.lower()
     bio = (rec.creator_bio or "").lower()
     tags = (rec.tags or "").lower()
-    combined = f"{name} {bio} {tags}"
+    douyin_id = (rec.douyin_id or "")
+    combined = f"{name_l} {bio} {tags}"
 
-    # 品牌/店铺关键词
+    # 抖音号含"店" → 直接判定为店铺号
+    if "店" in douyin_id:
+        return True
+
+    # 名称含强店铺词 → 直接判定（旗舰店/官方店/企业店/专卖店等，不管简介写什么）
+    strong_store_name = ["旗舰店", "官方店", "品牌店", "专卖店", "直营店", "企业店", "工厂店"]
+    if any(kw in name for kw in strong_store_name):
+        return True
+
+    # 品牌/店铺信号词
     store_signals = [
         "旗舰店", "官方店", "品牌店", "专卖店", "直营店",
-        "服饰店", "男装店", "商城", "店铺", "橱窗",
+        "服饰店", "男装店", "商城", "店铺",
         "正品", "工厂", "源头", "批发", "一件代发",
         "限时折扣", "秒杀", "包邮", "下单", "点击购买",
-        "shop", "store",
+        "shop", "store", "品牌直销",
     ]
-    # 达人信号（排除项）
+    # 品牌名信号（昵称中含明显品牌词）
+    brand_names = [
+        "劲霸", "海澜之家", "七匹狼", "太平鸟", "gxg", "gxg",
+        "森马", "美特斯邦威", "优衣库", "无印良品",
+        "恒源祥", "罗蒙", "杉杉", "雅戈尔", "九牧王",
+        "龙牙", "秘纤",
+    ]
+    # 达人信号（排除项，有这些说明是真人）
     creator_signals = [
         "测评", "穿搭", "改造", "避雷", "推荐", "试穿", "分享",
         "ootd", "日常", "生活", "vlog", "博主",
         "男生", "女生", "微胖", "大码", "小个子", "梨形",
+        "身高", "体重", "kg", "cm",
     ]
 
     has_store = any(kw in combined for kw in store_signals)
+    has_brand = any(kw in name_l for kw in brand_names)
     has_creator = any(kw in combined for kw in creator_signals)
 
-    # 有店铺信号且无达人信号 → 判定为店铺号
+    # 品牌名在昵称中且无个人特征 → 品牌号
+    if has_brand and not has_creator:
+        return True
+
+    # 店铺信号 + 无达人信号 → 店铺号
     if has_store and not has_creator:
         return True
 
-    # 昵称只有品牌名（无个人特征）
-    if len(name) <= 4 and has_store:
+    # 昵称纯品牌名（2-6 个汉字，无数字无 emoji）且无达人信号
+    pure_cn = re.sub(r'[^一-龥]', '', name)
+    if 2 <= len(pure_cn) <= 6 and len(name) <= 8 and has_store:
         return True
 
     return False
+
+
+def _is_waste_account(rec: CreatorRecord) -> tuple:
+    """检测废号：图文号、AI生成号、空壳号。返回 (是否为废号, 原因)。"""
+    bio = (rec.creator_bio or "").lower()
+    tags = (rec.tags or "").lower()
+    combined = f"{bio} {tags}"
+
+    # 图文号信号（只发图片/文案，不出镜）
+    image_text_signals = [
+        "图文作品", "图文创作", "图片分享", "每日壁纸", "壁纸分享",
+        "头像", "表情包", "日签", "早安语录", "晚安语录",
+        "写真", "摄影作品", "插画", "每日一图", "图文号",
+    ]
+    # AI生成信号（数字人/虚拟人，非真人出镜）
+    ai_signals = [
+        "ai生成", "aigc", "ai绘画", "ai创作", "ai数字人",
+        "数字人", "虚拟人", "虚拟主播", "ai虚拟",
+    ]
+
+    image_hits = [kw for kw in image_text_signals if kw in combined]
+    if image_hits:
+        return (True, f"疑似图文号（命中: {', '.join(image_hits[:3])}）")
+
+    ai_hits = [kw for kw in ai_signals if kw in combined]
+    if ai_hits:
+        return (True, f"疑似AI生成号（命中: {', '.join(ai_hits[:3])}）")
+
+    return (False, "")
+
+
+def _is_stale_account(rec: CreatorRecord) -> tuple:
+    """检测停更号。返回 (停更等级: 0=正常 1=>3月 2=>半年, 原因)。"""
+    publish_time = (rec.publish_time or "").strip()
+    if not publish_time:
+        return (0, "")
+
+    try:
+        from datetime import datetime
+        pub_dt = datetime.strptime(publish_time[:10], "%Y-%m-%d")
+        days = (datetime.now() - pub_dt).days
+    except (ValueError, TypeError):
+        return (0, "")
+
+    if days >= 180:
+        return (2, f"最近更新{days}天前（超过半年），疑似停更")
+    elif days >= 90:
+        return (1, f"最近更新{days}天前（超过3个月），可能停更")
+
+    return (0, "")
 
 
 def _fmt_followers(v) -> str:
@@ -399,6 +475,21 @@ def score_records(records: list[CreatorRecord]) -> list[CreatorRecord]:
             rec.priority_level = "B"
         elif rec.content_type == "泛生活方式" and rec.priority_level in ("S", "A", "B"):
             rec.priority_level = "C"
+
+        # 废号检测：图文号 / AI生成号 → 最高 C
+        is_waste, waste_reason = _is_waste_account(rec)
+        if is_waste and rec.priority_level not in ("淘汰", "C"):
+            rec.priority_level = "C"
+            rec.risk_reason = (rec.risk_reason or "") + f"；{waste_reason}"
+
+        # 停更检测：代表视频发布时间过旧 → 降级
+        stale_level, stale_reason = _is_stale_account(rec)
+        if stale_level >= 2 and rec.priority_level not in ("淘汰", "C"):
+            rec.priority_level = "C"
+        elif stale_level >= 1 and rec.priority_level in ("S", "A"):
+            rec.priority_level = "B"
+        if stale_reason:
+            rec.risk_reason = (rec.risk_reason or "") + f"；{stale_reason}"
 
         rec.cooperation_suggestion = coop_map.get(rec.priority_level, "暂不建议")
         rec.next_action = _next_action(rec.priority_level)

@@ -43,6 +43,7 @@ def run(
     keywords_override: list[str] | None = None,
     use_ai_keywords: bool = False,
     feedback_notes: list[str] | None = None,
+    skip_feishu_dedup: bool = False,
 ) -> dict:
     logger.info("=" * 60)
     logger.info(
@@ -141,6 +142,25 @@ def run(
     records = normalize_records(raw_rows, enrich_remote=enrich_remote)
     if not records:
         logger.warning("无有效候选记录，仍会写出空报表")
+
+    # 跨用户去重：从飞书知识库拉取已有达人，避免多人重复筛选
+    if not skip_feishu_dedup:
+        try:
+            from src.feishu.bitable_reader import fetch_known_creators
+            known_urls, known_ids = fetch_known_creators()
+            if known_urls or known_ids:
+                before = len(records)
+                records = [
+                    r for r in records
+                    if (r.creator_profile_url or "") not in known_urls
+                    and (not r.douyin_id or r.douyin_id not in known_ids)
+                ]
+                logger.info(
+                    f"[飞书去重] {before} → {len(records)} 条"
+                    f"（过滤 {before - len(records)} 条已存在达人）"
+                )
+        except Exception as e:
+            logger.warning(f"[飞书去重] 异常，跳过（不影响主流程）: {e}")
 
     if not skip_ai:
         try:

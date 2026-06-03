@@ -124,7 +124,8 @@ def extract_contact(rec: CreatorRecord, snippet: str = "") -> ContactResult:
             continue
         seen.add(key)
         parts.append(f"{t}:{txt}")
-    text_blob = "公开文本疑似联系方式 -> " + " ; ".join(parts[:8])
+    # 精简文本：只保留有效联系方式，去掉前缀
+    text_blob = "；".join(parts[:5])
 
     field_hits = {fname: True for _, _, fname in hits if _ == best_type}
 

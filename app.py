@@ -15,11 +15,129 @@ import streamlit as st
 
 from src.main import run
 from src.models.schemas import CREATOR_STATUS
+from src.storage.excel_writer import _fmt_contact, _fmt_follower_tier, _fmt_followers, _fmt_creator_tier, _fmt_like_ratio_and_flag
 from src.storage.sqlite_store import list_creators_with_status, update_creator_status
 from src.utils.config_loader import DATA_DIR, seed_keywords_config
 
 st.set_page_config(page_title="龙牙达人发现", layout="wide")
 st.title("🎯 龙牙外部达人自动发现")
+
+
+def _parse_followers(s: str) -> int:
+    """将格式化粉丝数（如 10.5w, 1234）转回整数用于筛选"""
+    if not s or s == "":
+        return 0
+    s = str(s).strip().lower()
+    if s.endswith("w") or s.endswith("万"):
+        try:
+            return int(float(s[:-1]) * 10000)
+        except ValueError:
+            return 0
+    try:
+        return int(float(s.replace(",", "")))
+    except ValueError:
+        return 0
+
+
+def _apply_follower_filter(df, col: str, selected_tiers: list[str]) -> "pd.DataFrame":
+    """根据粉丝量筛选 DataFrame，col 可以是格式化字符串或原始整数"""
+    if not selected_tiers:
+        return df
+    ranges = {
+        "不足1万": (0, 10000),
+        "1-5万": (10000, 50000),
+        "5-10万": (50000, 100000),
+        "10-50万": (100000, 500000),
+        "50-100万": (500000, 1000000),
+        "100万+": (1000000, 999999999),
+    }
+    # 判断列是格式化字符串还是整数
+    sample = df[col].dropna()
+    if len(sample) > 0:
+        first = sample.iloc[0]
+        if isinstance(first, str) and ("w" in first or "万" in first):
+            df["_follower_raw"] = df[col].apply(_parse_followers)
+        else:
+            df["_follower_raw"] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+    else:
+        return df
+    masks = []
+    for t in selected_tiers:
+        lo, hi = ranges[t]
+        masks.append((df["_follower_raw"] >= lo) & (df["_follower_raw"] < hi))
+    if masks:
+        combined = masks[0]
+        for m in masks[1:]:
+            combined = combined | m
+        df = df[combined]
+    df = df.drop(columns=["_follower_raw"])
+    return df
+
+
+def _tier_from_grading(grading: str) -> str:
+    """从粉丝量分级推导头腰尾量级。"""
+    if not grading or grading == "-":
+        return "-"
+    if "100万" in str(grading):
+        return "头部"
+    if "10万" in str(grading) or "50万" in str(grading):
+        return "腰部"
+    return "尾部"
+
+
+def _enrich_new_fields(df: pd.DataFrame) -> pd.DataFrame:
+    """给旧 Excel 数据补充量级/赞粉比/流量质量字段（如果缺失）。"""
+    # 量级：从粉丝量分级推导
+    if "量级" not in df.columns:
+        if "粉丝量分级" in df.columns:
+            df["量级"] = df["粉丝量分级"].apply(_tier_from_grading)
+        else:
+            df["量级"] = "-"
+    # 赞粉比 & 流量质量
+    if "赞粉比" not in df.columns:
+        has_likes = "点赞数" in df.columns
+        has_followers = "粉丝数" in df.columns
+        if has_likes and has_followers:
+            # 粉丝数可能是 "4.0w" 格式，先转整数；点赞数可能是空字符串
+            ratios = []
+            flags = []
+            for _, row in df.iterrows():
+                lc = row["点赞数"]
+                fc = row["粉丝数"]
+                # 空点赞 → 数据不足
+                if not lc or (isinstance(lc, str) and lc.strip() == ""):
+                    ratios.append("-")
+                    flags.append("数据不足")
+                    continue
+                # 粉丝数可能已格式化
+                try:
+                    likes = int(float(lc))
+                except (ValueError, TypeError):
+                    ratios.append("-")
+                    flags.append("数据不足")
+                    continue
+                # 解析粉丝数（处理 "4.0w" 和数字两种格式）
+                if isinstance(fc, str):
+                    followers = _parse_followers(fc)
+                else:
+                    try:
+                        followers = int(float(fc))
+                    except (ValueError, TypeError):
+                        followers = 0
+                if not followers:
+                    ratios.append("-")
+                    flags.append("数据不足")
+                    continue
+                r_text, flag = _fmt_like_ratio_and_flag(likes, followers)
+                ratios.append(r_text)
+                flags.append(flag)
+            df["赞粉比"] = ratios
+            df["流量质量"] = flags
+        else:
+            df["赞粉比"] = "-"
+            df["流量质量"] = "-"
+    return df
+
 
 # ===== 状态检测 =====
 def check_cdp():
@@ -84,22 +202,21 @@ if last_run_info:
     stats["last_run"] = last_run_info.get("runtime", stats["last_run"])
     stats["today_creators"] = max(stats["today_creators"], last_run_info.get("creators", 0))
 
-# 状态面板
-stcols = st.columns(4)
+# 状态面板 - 用 st.info 保留背景色
+stcols = st.columns(5)
 with stcols[0]:
-    if cdp_ok:
-        st.success(f"🟢 CDP 在线")
-    else:
-        st.error("🔴 CDP 离线")
+    if cdp_ok: st.success("🟢 CDP")
+    else: st.error("🔴 CDP")
 with stcols[1]:
-    if session_ok:
-        st.success(f"🟢 已登录抖音")
-    else:
-        st.error("🔴 需重新登录")
+    if session_ok: st.success("🟢 登录")
+    else: st.error("🔴 登录")
 with stcols[2]:
-    st.info(f"📊 本次 {stats['today_creators']} 达人")
+    r = last_run_info.get("creators", 0)
+    st.info(f"📊 本次\n{r}人")
 with stcols[3]:
-    st.info(f"⏱ 上次 {stats['last_run']}")
+    st.info(f"📅 今日\n{stats['today_creators']}人")
+with stcols[4]:
+    st.info(f"📦 总计\n{stats['total_creators']}人")
 
 # CDP 离线时显示启动命令
 if not cdp_ok:
@@ -161,7 +278,7 @@ with st.sidebar:
     st.header("⚡ 运行")
     skip_ai = st.checkbox("跳过 AI 评分（仅规则评分）", value=True)
 
-    if st.button("开始筛选", type="primary", use_container_width=True):
+    if st.button("开始筛选", type="primary", width="stretch"):
         keywords_final = None
         fb = None
         if not use_ai_kw:
@@ -254,6 +371,23 @@ with st.sidebar:
             }
             st.success(f"完成！{summary['unique']} 条达人，耗时 {em} 分 {es} 秒")
 
+    st.header("🎚 粉丝量筛选")
+    follower_ranges = {
+        "不足1万": (0, 10000),
+        "1-5万": (10000, 50000),
+        "5-10万": (50000, 100000),
+        "10-50万": (100000, 500000),
+        "50-100万": (500000, 1000000),
+        "100万+": (1000000, 999999999),
+    }
+    selected_tiers = st.multiselect(
+        "选择粉丝量级（留空=全部）",
+        list(follower_ranges.keys()),
+        default=[],
+        placeholder="全部",
+    )
+    st.session_state["follower_filter"] = selected_tiers
+
 # ===== 主区域 =====
 summary = st.session_state.get("last_summary")
 if summary:
@@ -276,13 +410,34 @@ else:
 
     with tab1:
         try:
-            df_top = pd.read_excel(latest, sheet_name="今日Top推荐")
+            df_top = pd.read_excel(latest, sheet_name="今日Top推荐").fillna("")
+            df_top = _enrich_new_fields(df_top)
+            # 粉丝量筛选
+            selected_tiers = st.session_state.get("follower_filter", [])
+            if selected_tiers and "粉丝数" in df_top.columns:
+                df_top = _apply_follower_filter(df_top, "粉丝数", selected_tiers)
+            # 列筛选控件
+            fc1, fc2, fc3 = st.columns(3)
+            with fc1:
+                level_filter = st.multiselect("推荐等级", ["S", "A", "B", "C"], key="tab1_level")
+            with fc2:
+                new_filter = st.multiselect("是否新达人", ["🆕新", "历史"], key="tab1_new")
+            with fc3:
+                product_filter = st.multiselect("是否挂车", ["是", "否", "未知"], key="tab1_product")
+            if level_filter:
+                df_top = df_top[df_top["推荐等级"].isin(level_filter)]
+            if new_filter:
+                df_top = df_top[df_top["是否新达人"].isin(new_filter)]
+            if product_filter:
+                df_top = df_top[df_top["是否挂车"].isin(product_filter)]
             cols = [c for c in [
                 "排名", "是否新达人", "推荐等级", "AI评分",
-                "评分明细", "评分理由", "达人昵称", "抖音达人类型", "粉丝数",
+                "评分明细", "达人昵称", "抖音号", "抖音达人类型",
+                "粉丝数", "粉丝量分级", "量级",
                 "推荐产品", "合作建议",
                 "公开联系方式", "联系方式类型",
                 "达人主页链接", "代表视频链接",
+                "是否挂车", "赞粉比", "流量质量",
                 "风险点", "搜索关键词", "数据来源", "提取状态",
             ] if c in df_top.columns]
 
@@ -291,24 +446,62 @@ else:
                 column_config["达人主页链接"] = st.column_config.LinkColumn("达人主页链接", display_text="🔗 打开")
             if "代表视频链接" in df_top.columns:
                 column_config["代表视频链接"] = st.column_config.LinkColumn("代表视频链接", display_text="▶ 打开")
+            if "AI评分" in df_top.columns:
+                column_config["AI评分"] = st.column_config.NumberColumn("AI评分", format="%.1f")
+            if "排名" in df_top.columns:
+                column_config["排名"] = st.column_config.NumberColumn("排名")
 
+            st.caption(f"共 {len(df_top)} 条")
             st.dataframe(df_top[cols], width="stretch", height=500, column_config=column_config or None)
         except Exception as e:
             st.error(f"读取失败：{e}")
 
-        with open(latest, "rb") as f:
-            st.download_button("📥 下载完整 Excel", data=f.read(), file_name=latest.name,
-                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
     with tab2:
         try:
-            df_all = pd.read_excel(latest, sheet_name="全部候选")
+            df_all = pd.read_excel(latest, sheet_name="全部候选").fillna("")
+            df_all = _enrich_new_fields(df_all)
+            # 粉丝量筛选
+            selected_tiers = st.session_state.get("follower_filter", [])
+            if selected_tiers and "粉丝数" in df_all.columns:
+                df_all = _apply_follower_filter(df_all, "粉丝数", selected_tiers)
+            # 列筛选控件
+            afc1, afc2, afc3 = st.columns(3)
+            with afc1:
+                a_level_filter = st.multiselect("推荐等级", ["S", "A", "B", "C"], key="tab2_level")
+            with afc2:
+                a_product_filter = st.multiselect("是否挂车", ["是", "否", "未知"], key="tab2_product")
+            with afc3:
+                a_contact_filter = st.multiselect("公开联系方式", ["有", "无"], key="tab2_contact")
+            if a_level_filter:
+                df_all = df_all[df_all["推荐等级"].isin(a_level_filter)]
+            if a_product_filter:
+                df_all = df_all[df_all["是否挂车"].isin(a_product_filter)]
+            if a_contact_filter:
+                df_all = df_all[df_all["是否有公开联系方式"].isin(a_contact_filter)]
+            # 只显示有用的列
+            show_cols = [c for c in [
+                "推荐等级", "AI评分", "推荐理由",
+                "达人昵称", "抖音号", "抖音达人类型", "粉丝数", "粉丝量分级", "量级",
+                "内容类型", "是否接近果子模式",
+                "推荐产品", "合作建议",
+                "是否有公开联系方式", "公开联系方式",
+                "达人主页链接", "代表视频链接",
+                "是否挂车", "赞粉比", "流量质量",
+                "风险点", "下一步动作",
+                "搜索关键词", "提取状态",
+                "采集日期",
+            ] if c in df_all.columns]
             all_col_config = {}
             if "达人主页链接" in df_all.columns:
                 all_col_config["达人主页链接"] = st.column_config.LinkColumn("达人主页链接", display_text="🔗 打开")
             if "代表视频链接" in df_all.columns:
                 all_col_config["代表视频链接"] = st.column_config.LinkColumn("代表视频链接", display_text="▶ 打开")
-            st.dataframe(df_all, width="stretch", height=500, column_config=all_col_config or None)
+            if "AI评分" in df_all.columns:
+                all_col_config["AI评分"] = st.column_config.NumberColumn("AI评分", format="%.1f")
+            if "粉丝数" in df_all.columns:
+                all_col_config["粉丝数"] = st.column_config.TextColumn("粉丝数")
+            st.caption(f"共 {len(df_all)} 条")
+            st.dataframe(df_all[show_cols], width="stretch", height=500, column_config=all_col_config or None)
         except Exception as e:
             st.error(f"读取失败：{e}")
 
@@ -318,18 +511,102 @@ else:
         if not status_rows:
             st.info("SQLite 里还没有达人记录，先跑一次筛选。")
         else:
-            df_status = pd.DataFrame(status_rows)
+            df_status = pd.DataFrame(status_rows).fillna("")
+
+            # 粉丝量筛选（在格式化前，基于原始整数）
+            selected_tiers = st.session_state.get("follower_filter", [])
+            if selected_tiers and "latest_follower_count" in df_status.columns:
+                df_status = _apply_follower_filter(df_status, "latest_follower_count", selected_tiers)
+
+            # 粉丝量分级（在格式化前）
+            if "latest_follower_count" in df_status.columns:
+                df_status["粉丝量分级"] = df_status["latest_follower_count"].apply(_fmt_follower_tier)
+
+            # 格式化粉丝数
+            if "latest_follower_count" in df_status.columns:
+                df_status["latest_follower_count"] = df_status["latest_follower_count"].apply(_fmt_followers)
+            if "contact_text" in df_status.columns:
+                df_status["contact_text"] = df_status["contact_text"].apply(_fmt_contact)
+            if "contact_visible" in df_status.columns:
+                df_status["contact_visible"] = df_status["contact_visible"].apply(
+                    lambda v: "有" if str(v) == "是" else ("无" if str(v) == "否" else "")
+                )
+            if "first_seen_date" in df_status.columns:
+                df_status["是否新达人"] = df_status.apply(
+                    lambda row: "🆕新" if str(row.get("first_seen_date", "")) == str(row.get("last_seen_date", "")) else "历史",
+                    axis=1,
+                )
+
             df_status = df_status.rename(columns={
-                "creator_name": "达人昵称", "platform": "平台",
-                "latest_follower_count": "粉丝数", "latest_score": "AI评分",
-                "priority_level": "推荐等级", "status": "当前状态",
-                "creator_profile_url": "主页链接",
-                "contact_text": "公开联系方式", "extraction_status": "提取状态",
+                "creator_name": "达人昵称",
+                "douyin_id": "抖音号",
+                "creator_id": "达人ID",
+                "platform": "平台",
+                "latest_follower_count": "粉丝数",
+                "main_content_type": "内容类型",
+                "latest_score": "AI评分",
+                "priority_level": "推荐等级",
+                "status": "当前状态",
+                "creator_profile_url": "达人主页链接",
+                "video_url": "代表视频链接",
+                "contact_visible": "是否有公开联系方式",
+                "contact_text": "公开联系方式",
+                "has_product_link": "是否挂车",
+                "contact_type": "联系方式类型",
+                "extraction_status": "提取状态",
+                "missing_reason": "缺失原因",
+                "search_keyword": "搜索关键词",
+                "recommend_reason": "推荐理由",
+                "risk_reason": "风险点",
+                "next_action": "下一步动作",
+                "last_seen_date": "上次出现",
+                "url_type": "链接类型",
+                "creator_tier": "量级",
+                "like_follower_ratio": "赞粉比",
+                "traffic_quality_flag": "流量质量",
             })
+
+            show_cols = [c for c in [
+                "是否新达人", "推荐等级", "AI评分", "当前状态",
+                "达人昵称", "抖音号", "粉丝数", "粉丝量分级", "量级", "内容类型",
+                "推荐理由", "风险点", "下一步动作",
+                "是否有公开联系方式", "公开联系方式",
+                "达人主页链接", "代表视频链接",
+                "是否挂车", "赞粉比", "流量质量",
+                "搜索关键词", "提取状态",
+                "上次出现",
+            ] if c in df_status.columns]
+
+            # 列筛选控件
+            sfc1, sfc2, sfc3, sfc4 = st.columns(4)
+            with sfc1:
+                s_level_filter = st.multiselect("推荐等级", ["S", "A", "B", "C", "淘汰"], key="tab3_level")
+            with sfc2:
+                s_new_filter = st.multiselect("是否新达人", ["🆕新", "历史"], key="tab3_new")
+            with sfc3:
+                s_product_filter = st.multiselect("是否挂车", ["是", "否", "未知"], key="tab3_product")
+            with sfc4:
+                s_status_filter = st.multiselect("当前状态", CREATOR_STATUS, key="tab3_status")
+            if s_level_filter:
+                df_status = df_status[df_status["推荐等级"].isin(s_level_filter)]
+            if s_new_filter:
+                df_status = df_status[df_status["是否新达人"].isin(s_new_filter)]
+            if s_product_filter:
+                df_status = df_status[df_status["是否挂车"].isin(s_product_filter)]
+            if s_status_filter:
+                df_status = df_status[df_status["当前状态"].isin(s_status_filter)]
+
             status_col_config = {}
-            if "主页链接" in df_status.columns:
-                status_col_config["主页链接"] = st.column_config.LinkColumn("主页链接", display_text="🔗 打开")
-            st.dataframe(df_status, width="stretch", height=400, column_config=status_col_config or None)
+            if "达人主页链接" in df_status.columns:
+                status_col_config["达人主页链接"] = st.column_config.LinkColumn("达人主页链接", display_text="🔗 打开")
+            if "代表视频链接" in df_status.columns:
+                status_col_config["代表视频链接"] = st.column_config.LinkColumn("代表视频链接", display_text="▶ 打开")
+            if "AI评分" in df_status.columns:
+                status_col_config["AI评分"] = st.column_config.NumberColumn("AI评分", format="%.1f")
+            if "粉丝数" in df_status.columns:
+                status_col_config["粉丝数"] = st.column_config.TextColumn("粉丝数")
+            st.caption(f"共 {len(df_status)} 条")
+            st.dataframe(df_status[show_cols], width="stretch", height=400, column_config=status_col_config or None)
 
             col_a, col_b, col_c = st.columns(3)
             with col_a:
@@ -409,5 +686,40 @@ else:
                             st.markdown("**最近视频**：")
                             for v in videos[:5]:
                                 st.markdown(f"- [{v['desc'][:60]}]({v['video_url']}) | 👍{v['likes']} 💬{v['comments']} ↗{v['shares']}")
+
+    new_only = st.checkbox("🆕 仅导出新增达人", value=False,
+        help="勾选后仅导出首次发现的达人，方便增量处理")
+    if new_only:
+        # 从 SQLite 获取新达人集合（首次出现日期 == 最近出现日期）
+        try:
+            import sqlite3
+            db = DATA_DIR / "database" / "creator_finder.db"
+            conn = sqlite3.connect(str(db))
+            new_rows = conn.execute(
+                "SELECT creator_profile_url FROM creators WHERE first_seen_date = last_seen_date"
+            ).fetchall()
+            conn.close()
+            new_urls = {r[0] for r in new_rows if r[0]}
+            # 读取全部候选，过滤出新达人
+            df_all = pd.read_excel(latest, sheet_name="全部候选").fillna("")
+            if "达人主页链接" in df_all.columns:
+                df_filtered = df_all[df_all["达人主页链接"].isin(new_urls)]
+            else:
+                df_filtered = df_all.head(0)
+            from io import BytesIO
+            buf = BytesIO()
+            with pd.ExcelWriter(buf, engine="openpyxl") as w:
+                df_filtered.to_excel(w, sheet_name="新增达人", index=False)
+            buf.seek(0)
+            label = f"📥 下载新增达人（{len(df_filtered)}条）"
+            st.download_button(label, data=buf.getvalue(),
+                file_name=f"new_creators_{latest.name}",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        except Exception as e:
+            st.warning(f"无法生成增量导出：{e}")
+    else:
+        with open(latest, "rb") as f:
+            st.download_button("📥 下载完整 Excel", data=f.read(), file_name=latest.name,
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 st.caption(f"🕐 页面刷新时间：{datetime.now():%Y-%m-%d %H:%M:%S}")

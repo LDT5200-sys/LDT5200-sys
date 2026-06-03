@@ -15,9 +15,11 @@ logger = get_logger()
 
 _TOP_COLUMNS_CN = [
     "排名", "是否新达人", "推荐等级", "AI评分", "评分明细", "推荐理由",
-    "达人昵称", "抖音达人类型", "粉丝数", "推荐产品", "合作建议",
+    "达人昵称", "抖音号", "抖音达人类型", "粉丝数", "粉丝量分级", "量级",
+    "推荐产品", "合作建议",
     "公开联系方式", "联系方式类型",
     "达人主页链接", "代表视频链接",
+    "是否挂车", "赞粉比", "流量质量",
     "搜索关键词", "数据来源", "提取状态",
 ]
 
@@ -36,6 +38,28 @@ def _fmt_followers(v) -> str:
     return str(n)
 
 
+def _fmt_follower_tier(v) -> str:
+    """粉丝量分级标签"""
+    if v is None or v == "" or (isinstance(v, float) and v != v):
+        return ""
+    try:
+        n = int(float(v))
+    except (ValueError, TypeError):
+        return ""
+    if n < 10000:
+        return "不足1万"
+    elif n < 50000:
+        return "1-5万"
+    elif n < 100000:
+        return "5-10万"
+    elif n < 500000:
+        return "10-50万"
+    elif n < 1000000:
+        return "50-100万"
+    else:
+        return "100万+"
+
+
 def _records_to_df(records: list[CreatorRecord]) -> pd.DataFrame:
     rows = [r.model_dump() for r in records]
     df = pd.DataFrame(rows)
@@ -43,10 +67,99 @@ def _records_to_df(records: list[CreatorRecord]) -> pd.DataFrame:
         if col not in df.columns:
             df[col] = ""
     df = df[STANDARD_FIELDS].fillna("")
+    # 粉丝量分级（必须在格式化为万单位之前，需要原始整数）
+    if "follower_count" in df.columns:
+        df["粉丝量分级"] = df["follower_count"].apply(_fmt_follower_tier)
+    # 量级（头腰尾）
+    if "follower_count" in df.columns:
+        df["量级"] = df["follower_count"].apply(_fmt_creator_tier)
+    # 赞粉比和流量质量（需要在粉丝数格式化之前）
+    if "like_count" in df.columns and "follower_count" in df.columns:
+        df["赞粉比"], df["流量质量"] = zip(*df.apply(
+            lambda row: _fmt_like_ratio_and_flag(row["like_count"], row["follower_count"]),
+            axis=1,
+        ))
+    else:
+        df["赞粉比"] = "-"
+        df["流量质量"] = "数据不足"
     # 粉丝数格式化为万单位
     if "follower_count" in df.columns:
         df["follower_count"] = df["follower_count"].apply(_fmt_followers)
+    # 精简联系方式显示
+    if "contact_text" in df.columns:
+        df["contact_text"] = df["contact_text"].apply(_fmt_contact)
+    if "contact_visible" in df.columns:
+        df["contact_visible"] = df["contact_visible"].apply(
+            lambda v: "有" if str(v) == "是" else ("无" if str(v) == "否" else "")
+        )
     return df
+
+
+def _fmt_contact(v) -> str:
+    """精简联系方式文本"""
+    if not v or v == "" or (isinstance(v, float) and v != v):
+        return ""
+    s = str(v)
+    if s == "未发现公开联系方式":
+        return "无"
+    if "上游来源标注" in s:
+        return s.replace("上游来源标注：", "").replace("（原文未提供）", "").strip()
+    # 去掉长前缀
+    s = s.replace("公开文本疑似联系方式 -> ", "")
+    if len(s) > 50:
+        s = s[:50] + "..."
+    return s
+
+
+def _fmt_creator_tier(v) -> str:
+    """量级划分：头部/腰部/尾部"""
+    if v is None or v == "" or (isinstance(v, float) and v != v):
+        return "-"
+    try:
+        n = int(float(v))
+    except (ValueError, TypeError):
+        return "-"
+    if n >= 1_000_000:
+        return "头部"
+    elif n >= 100_000:
+        return "腰部"
+    else:
+        return "尾部"
+
+
+def _fmt_like_ratio_and_flag(like_count, follower_count):
+    """返回 (赞粉比文本, 流量质量标记)。"""
+    try:
+        likes = int(float(like_count))
+        followers = int(float(follower_count))
+    except (ValueError, TypeError):
+        return ("-", "数据不足")
+    if not likes or not followers:
+        return ("-", "数据不足")
+
+    ratio = likes / followers
+
+    # 赞粉比格式化
+    if ratio >= 1:
+        ratio_text = f"{ratio:.1f}"
+    elif ratio >= 0.01:
+        ratio_text = f"{ratio * 100:.1f}%"
+    else:
+        ratio_text = f"{ratio * 100:.2f}%"
+
+    # 流量质量判定
+    if followers >= 1_000_000 and ratio < 0.001:
+        flag = "疑似虚假流量"
+    elif followers >= 100_000 and ratio < 0.005:
+        flag = "疑似虚假流量"
+    elif followers < 100_000 and ratio < 0.01:
+        flag = "疑似虚假流量"
+    elif ratio > 3.0:
+        flag = "注意-高互动"
+    else:
+        flag = "正常"
+
+    return (ratio_text, flag)
 
 
 def _to_chinese(df: pd.DataFrame) -> pd.DataFrame:
@@ -77,6 +190,11 @@ def _build_top(df: pd.DataFrame, top_n: int = 50) -> pd.DataFrame:
     ranked = df[df["priority_level"].isin(["S", "A", "B", "C"])].copy()
     ranked = ranked.sort_values("ai_score", ascending=False).head(top_n).fillna("")
 
+    # 补充可能缺失的新字段
+    for col in ["量级", "赞粉比", "流量质量"]:
+        if col not in ranked.columns:
+            ranked[col] = "-"
+
     # 标记是否新达人（用 creator_id 查 SQLite 历史）
     from src.utils.time_utils import today_str
     old_creators = _get_new_creators(today_str("%Y-%m-%d"))
@@ -95,12 +213,17 @@ def _build_top(df: pd.DataFrame, top_n: int = 50) -> pd.DataFrame:
         "risk_reason": "评分明细",
         "recommend_reason": "推荐理由",
         "creator_name": "达人昵称",
+        "douyin_id": "抖音号",
+        "creator_id": "达人ID",
         "follower_count": "粉丝数",
         "douyin_type": "抖音达人类型",
+        "推荐产品": "推荐产品",
+        "推荐产品": "推荐产品",
         "recommended_product": "推荐产品",
         "cooperation_suggestion": "合作建议",
         "creator_profile_url": "达人主页链接",
         "video_url": "代表视频链接",
+        "has_product_link": "是否挂车",
         "url_type": "链接类型",
         "contact_text": "公开联系方式",
         "contact_type": "联系方式类型",
@@ -110,6 +233,9 @@ def _build_top(df: pd.DataFrame, top_n: int = 50) -> pd.DataFrame:
         "search_keyword": "搜索关键词",
         "source_name": "数据来源",
         "source_url": "数据来源链接",
+        "量级": "量级",
+        "赞粉比": "赞粉比",
+        "流量质量": "流量质量",
     })
     return ranked[_TOP_COLUMNS_CN]
 

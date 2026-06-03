@@ -36,7 +36,8 @@ class CreatorRecord(BaseModel):
     search_keyword: str = ""
 
     creator_name: str = ""
-    creator_id: str = ""
+    creator_id: str = ""           # 内部ID（sec_uid）
+    douyin_id: str = ""            # 抖音号（用户可见的 @账号名）
     creator_profile_url: str = ""
     video_url: str = ""
     video_title: str = ""
@@ -56,6 +57,9 @@ class CreatorRecord(BaseModel):
     contact_location: str = "未知"
     contact_text: str = ""           # 公开联系方式原文
     contact_type: str = "未知"       # 邮箱/微信/手机号/星图/商务合作入口/未知
+
+    # 商业化标识
+    has_product_link: str = "未知"    # 是否挂车：是/否/未知
 
     # 来源 & 链接元信息
     source_url: str = ""             # 原始来源链接（搜索结果页/星图卡片等）
@@ -91,10 +95,11 @@ class CreatorRecord(BaseModel):
         return _to_int(v)
 
     @field_validator(
-        "creator_name", "creator_id", "creator_profile_url", "video_url",
+        "creator_name", "creator_id", "douyin_id", "creator_profile_url", "video_url",
         "video_title", "video_desc", "creator_bio", "tags", "raw_text", "raw_data",
         "platform", "search_keyword", "source_name", "collect_date", "publish_time",
         "contact_visible", "contact_location", "contact_text", "contact_type",
+        "has_product_link",
         "source_url", "url_type", "extraction_status", "missing_reason",
         mode="before",
     )
@@ -125,11 +130,12 @@ class CreatorRecord(BaseModel):
 # 标准字段顺序，供 Excel / DataFrame 输出统一使用
 STANDARD_FIELDS: list[str] = [
     "collect_date", "source_name", "source_url", "platform", "search_keyword",
-    "creator_name", "creator_id", "creator_profile_url",
+    "creator_name", "creator_id", "douyin_id", "creator_profile_url",
     "video_url", "url_type", "video_title", "video_desc", "publish_time",
     "like_count", "comment_count", "share_count", "collect_count", "follower_count",
     "creator_bio", "tags",
     "contact_visible", "contact_text", "contact_type", "contact_location",
+    "has_product_link",
     "extraction_status", "missing_reason",
     "raw_text", "raw_data",
     "content_type", "douyin_type", "is_fit_longya", "is_guozi_like",

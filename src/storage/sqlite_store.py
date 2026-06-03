@@ -98,6 +98,9 @@ _NEW_COLUMNS = [
     ("creators", "url_type", "TEXT"),
     ("creators", "extraction_status", "TEXT"),
     ("creators", "missing_reason", "TEXT"),
+    ("creators", "creator_id", "TEXT"),
+    ("creators", "has_product_link", "TEXT"),
+    ("creators", "douyin_id", "TEXT"),
     ("daily_results", "contact_visible", "TEXT"),
     ("daily_results", "contact_text", "TEXT"),
     ("daily_results", "extraction_status", "TEXT"),
@@ -169,8 +172,9 @@ def upsert_records(records: Iterable[CreatorRecord], run_date: str | None = None
                     latest_follower_count, main_content_type, latest_score,
                     priority_level, first_seen_date, last_seen_date, status,
                     contact_visible, contact_text, contact_type, contact_location,
-                    source_url, url_type, extraction_status, missing_reason
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    source_url, url_type, extraction_status, missing_reason,
+                    creator_id, douyin_id, has_product_link
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(creator_key) DO UPDATE SET
                     platform=excluded.platform,
                     creator_name=excluded.creator_name,
@@ -187,13 +191,17 @@ def upsert_records(records: Iterable[CreatorRecord], run_date: str | None = None
                     source_url=excluded.source_url,
                     url_type=excluded.url_type,
                     extraction_status=excluded.extraction_status,
-                    missing_reason=excluded.missing_reason
+                    missing_reason=excluded.missing_reason,
+                    creator_id=excluded.creator_id,
+                    douyin_id=excluded.douyin_id,
+                    has_product_link=excluded.has_product_link
             """, (
                 ck, rec.platform, rec.creator_name, rec.creator_profile_url,
                 rec.follower_count, rec.content_type, rec.ai_score,
                 rec.priority_level, first_seen, run_date, keep_status,
                 rec.contact_visible, rec.contact_text, rec.contact_type, rec.contact_location,
                 rec.source_url, rec.url_type, rec.extraction_status, rec.missing_reason,
+                rec.creator_id, rec.douyin_id, rec.has_product_link,
             ))
 
             if vk:
@@ -249,13 +257,96 @@ def update_creator_status(creator_key: str, new_status: str, note: str = "") -> 
     logger.info(f"状态更新 {creator_key}: {old} → {new_status}")
 
 
+def _compute_creator_tier(follower_count) -> str:
+    """基于粉丝数划分头腰尾量级。"""
+    if follower_count is None:
+        return "-"
+    fc = int(follower_count)
+    if fc >= 1_000_000:
+        return "头部"
+    elif fc >= 100_000:
+        return "腰部"
+    else:
+        return "尾部"
+
+
+def _compute_like_ratio_and_flag(like_count, follower_count) -> tuple:
+    """返回 (赞粉比文本, 流量质量标记)。
+
+    赞粉比 = 单条代表视频点赞 / 粉丝数，反映真实互动水平。
+    数据异常低 → 疑似买粉/假号；过高 → 标记注意但不判假。
+    """
+    if not like_count or not follower_count:
+        return ("-", "数据不足")
+    try:
+        likes = int(like_count)
+        followers = int(follower_count)
+    except (ValueError, TypeError):
+        return ("-", "数据不足")
+    if followers == 0:
+        return ("-", "数据不足")
+
+    ratio = likes / followers
+
+    # 赞粉比格式化
+    if ratio >= 1:
+        ratio_text = f"{ratio:.1f}"
+    elif ratio >= 0.01:
+        ratio_text = f"{ratio * 100:.1f}%"
+    else:
+        ratio_text = f"{ratio * 100:.2f}%"
+
+    # 流量质量判定（重点抓互动率过低 → 疑似假粉）
+    if followers >= 1_000_000 and ratio < 0.001:
+        flag = "疑似虚假流量"
+    elif followers >= 100_000 and ratio < 0.005:
+        flag = "疑似虚假流量"
+    elif followers < 100_000 and ratio < 0.01:
+        flag = "疑似虚假流量"
+    elif ratio > 3.0:
+        flag = "注意-高互动"
+    else:
+        flag = "正常"
+
+    return (ratio_text, flag)
+
+
 def list_creators_with_status() -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT creator_key, creator_name, platform, latest_follower_count, "
-            "latest_score, priority_level, status, last_seen_date, "
-            "contact_visible, contact_text, extraction_status, missing_reason, "
-            "creator_profile_url, url_type "
-            "FROM creators ORDER BY latest_score DESC"
+            "SELECT c.creator_key, c.creator_id, c.creator_name, c.platform, c.latest_follower_count, "
+            "c.main_content_type, c.latest_score, c.priority_level, c.status, "
+            "c.last_seen_date, c.first_seen_date, "
+            "c.contact_visible, c.contact_text, c.contact_type, "
+            "c.has_product_link, c.douyin_id, "
+            "c.extraction_status, c.missing_reason, "
+            "c.creator_profile_url, c.url_type, "
+            "d.search_keyword, d.recommend_reason, d.risk_reason, d.next_action, "
+            "v.video_url, v.like_count "
+            "FROM creators c "
+            "LEFT JOIN daily_results d ON c.creator_key = d.creator_key "
+            "AND d.rowid = ("
+            "  SELECT rowid FROM daily_results "
+            "  WHERE creator_key = c.creator_key "
+            "  ORDER BY run_date DESC, ai_score DESC LIMIT 1"
+            ") "
+            "LEFT JOIN videos v ON c.creator_key = v.creator_key "
+            "AND v.rowid = ("
+            "  SELECT rowid FROM videos "
+            "  WHERE creator_key = c.creator_key "
+            "  ORDER BY ai_score DESC, collect_date DESC LIMIT 1"
+            ") "
+            "ORDER BY c.latest_score DESC"
         ).fetchall()
-        return [dict(r) for r in rows]
+
+        results = []
+        for r in rows:
+            d = dict(r)
+            fc = d.get("latest_follower_count")
+            lc = d.get("like_count")
+            d["creator_tier"] = _compute_creator_tier(fc)
+            ratio_text, flag = _compute_like_ratio_and_flag(lc, fc)
+            d["like_follower_ratio"] = ratio_text
+            d["traffic_quality_flag"] = flag
+            results.append(d)
+        return results
